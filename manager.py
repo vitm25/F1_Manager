@@ -1,6 +1,7 @@
 import pygame
 import math
 import sys
+import random
 pygame.init() # spusteni knihovny
 
 rozliseni_okna = (1000, 600)
@@ -19,24 +20,34 @@ game_state = GAME_STATE_RACE
 race_time = 0.0
 font = pygame.font.SysFont(None, 36)
 
+TIRES = {
+    "SOFT": {"pace": -0.3, "wear": 0.04},
+    "MEDIUM": {"pace": 0.0, "wear": 0.025},
+    "HARD": {"pace": 0.3, "wear": 0.015}
+}
+
 class Driver:
-    def __init__(self, name):
+    def __init__(self, name, base_lap_time, tire):
         self.name = name
-        self.lap_time = 3.0
+        self.base_lap_time = base_lap_time
+        self.tire = tire
+        self.tire_wear = 0.0
+        
         self.current_lap = 0
         self.total_time = 0.0
         self.lap_timer = 0.0
+        
+        self.in_pit = False
+        self.pit_timer = 0.0
 
 drivers = [
-    Driver("Driver A"),
-    Driver("Driver B"),
-    Driver("Driver C"),
-    Driver("Driver D"),
-    Driver("Driver E"),
-    Driver("Driver F"),
-    ]
+    Driver("Driver A", 3.0, "SOFT"),
+    Driver("Driver B", 3.1, "MEDIUM"),
+    Driver("Driver C", 3.2, "HARD"),
+]
            
 lap_timer = 0.0
+PIT_TIME = 5.0
 
 # vykreslovaci smycka
 while True:
@@ -55,13 +66,34 @@ while True:
         race_time += delta_time
         
         for d in drivers:
+            drivers.sort(
+                key=lambda d: (-d.current_lap, d.total_time)
+            )
             d.lap_timer += delta_time
             
-            if d.lap_timer >= d.lap_time:
-                d.lap_timer -= d.lap_time
+            tire_data = TIRES[d.tire]
+            
+            degradation = d.tire_wear * 0.5
+            variation = random.uniform(-0.1, 0.1)
+            
+            current_lap_time = (
+                d.base_lap_time +
+                tire_data["pace"] +
+                degradation +
+                variation
+            )
+            
+            if d.lap_timer >= current_lap_time:
+                d.lap_timer -= current_lap_time
                 d.current_lap += 1
-                d.total_time += d.lap_time
-                print(f"{d.name} completed lap {d.current_lap}")
+                d.total_time += current_lap_time
+                d.tire_wear += tire_data["wear"]
+                
+    #eventy
+    if event.type == pygame.KEYDOWN:
+        if event.key == pygame.K_p:
+            driver = drivers[0] #zatím jen první jezdec
+                
                 
         
     #draw
@@ -72,9 +104,9 @@ while True:
     
     
     y = 60
-    for d in drivers:
+    for i,d in enumerate(drivers, start=1):
         text = font.render(
-            f"{d.name} | Lap: {d.current_lap} | Time: {d.total_time:.1f}s",
+            f"P{i} | {d.name} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s",
             True,
             (200,200,200)
         )
