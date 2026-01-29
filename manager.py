@@ -22,12 +22,20 @@ font = pygame.font.SysFont(None, 36)
 class Driver:
     def __init__(self, name):
         self.name = name
-        self.lap_time = 5.0
+        self.lap_time = 3.0
         self.current_lap = 0
         self.total_time = 0.0
+        self.lap_timer = 0.0
 
-driver = Driver("Driver A")
-
+drivers = [
+    Driver("Driver A"),
+    Driver("Driver B"),
+    Driver("Driver C"),
+    Driver("Driver D"),
+    Driver("Driver E"),
+    Driver("Driver F"),
+    ]
+           
 lap_timer = 0.0
 
 # vykreslovaci smycka
@@ -46,13 +54,15 @@ while True:
     if game_state == GAME_STATE_RACE:
         race_time += delta_time
         
-        lap_timer += delta_time
+        for d in drivers:
+            d.lap_timer += delta_time
             
-        if lap_timer >= driver.lap_time:
-            lap_timer -= driver.lap_time
-            driver.current_lap += 1
-            driver.total_time += driver.lap_time
-            print(f"{driver.name} completed lap {driver.current_lap}")
+            if d.lap_timer >= d.lap_time:
+                d.lap_timer -= d.lap_time
+                d.current_lap += 1
+                d.total_time += d.lap_time
+                print(f"{d.name} completed lap {d.current_lap}")
+                
         
     #draw
     screen.fill((20,20,20,))
@@ -60,13 +70,17 @@ while True:
     time_text = font.render(f"Race time: {race_time:.1f}s", True, (255,255,255))
     screen.blit(time_text, (20,20))
     
-    pygame.display.flip()
     
-    driver_text = font.render(
-        f"{driver.name} | Lap: {driver.current_lap} | Time: {driver.total_time:.1f}s",
-        True,
-        (200,200,200)
-    )
-    screen.blit(driver_text, (20,60))
+    y = 60
+    for d in drivers:
+        text = font.render(
+            f"{d.name} | Lap: {d.current_lap} | Time: {d.total_time:.1f}s",
+            True,
+            (200,200,200)
+        )
+        screen.blit(text, (20, y))
+        y += 30
+    
+    pygame.display.flip()
     
     
