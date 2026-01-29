@@ -20,15 +20,15 @@ race_time = 0.0
 font = pygame.font.SysFont(None, 36)
 
 class Driver:
-    def _init_(self, name):
+    def __init__(self, name):
         self.name = name
-        self.lap_time = 90.0
+        self.lap_time = 5.0
         self.current_lap = 0
         self.total_time = 0.0
 
-    driver = Driver("Driver A")
-        
-    lap_timer = 0.0
+driver = Driver("Driver A")
+
+lap_timer = 0.0
 
 # vykreslovaci smycka
 while True:
@@ -42,11 +42,12 @@ while True:
             # vypnuti programu
             sys.exit()
             
+    #update
     if game_state == GAME_STATE_RACE:
         race_time += delta_time
         
         lap_timer += delta_time
-    
+            
         if lap_timer >= driver.lap_time:
             lap_timer -= driver.lap_time
             driver.current_lap += 1
@@ -60,5 +61,12 @@ while True:
     screen.blit(time_text, (20,20))
     
     pygame.display.flip()
+    
+    driver_text = font.render(
+        f"{driver.name} | Lap: {driver.current_lap} | Time: {driver.total_time:.1f}s",
+        True,
+        (200,200,200)
+    )
+    screen.blit(driver_text, (20,60))
     
     
