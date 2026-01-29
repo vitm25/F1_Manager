@@ -53,13 +53,22 @@ PIT_TIME = 5.0
 while True:
     delta_time = clock.tick(FPS) / 1000
     # kontrola probehlych udalosti
-    for udalost in pygame.event.get():
+    for event in pygame.event.get():
         # kontrola udalosti "vypnout"
-        if udalost.type == pygame.QUIT:
+        if event.type == pygame.QUIT:
             # vypnuti knihovny
             pygame.quit()
             # vypnuti programu
             sys.exit()
+            
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_p:
+                driver = drivers[0] #zatím jen první jezdec
+                
+                if not driver.in_pit:
+                    driver.in_pit = Trueh
+                    driver.pit_timer = 0.0
+                    print(f"{driver.name} entering pit lane")
             
     #update
     if game_state == GAME_STATE_RACE:
@@ -69,7 +78,17 @@ while True:
             drivers.sort(
                 key=lambda d: (-d.current_lap, d.total_time)
             )
-            d.lap_timer += delta_time
+            
+            if d.in_pit:
+                d.lap_timer += delta_time
+                
+                if d.pit_timer >= PIT_TIME:
+                    d.in_pit = False
+                    d.tire = "MEDIUM"
+                    d.tire_wear = 0.0
+                    print(f"{d.name} pit stop completed")
+                    
+                continue 
             
             tire_data = TIRES[d.tire]
             
@@ -90,12 +109,12 @@ while True:
                 d.tire_wear += tire_data["wear"]
                 
     #eventy
-    if event.type == pygame.KEYDOWN:
-        if event.key == pygame.K_p:
-            driver = drivers[0] #zatím jen první jezdec
-                
-                
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+            
         
+                        
     #draw
     screen.fill((20,20,20,))
     
@@ -105,10 +124,12 @@ while True:
     
     y = 60
     for i,d in enumerate(drivers, start=1):
+        status = "PIT" if d.in_pit else d.tire
+        
         text = font.render(
-            f"P{i} | {d.name} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s",
+            f"P{i} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s",
             True,
-            (200,200,200)
+            (255,200,100) if d.in_pit else (200,200,200)
         )
         screen.blit(text, (20, y))
         y += 30
