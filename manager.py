@@ -26,11 +26,13 @@ TIRES = {
     "HARD": {"pace": 0.3, "wear": 0.015}
 }
 
-class Driver:
+class Driver: # jezdec
     def __init__(self, name, base_lap_time, tire):
         self.name = name
         self.base_lap_time = base_lap_time
+        
         self.tire = tire
+        self.next_tire = tire
         self.tire_wear = 0.0
         
         self.current_lap = 0
@@ -39,6 +41,11 @@ class Driver:
         
         self.in_pit = False
         self.pit_timer = 0.0
+        
+        self.last_pit_lap = -999
+        self.pit_cooldown_laps = 2
+        
+        self.pit_error = False 
 
 drivers = [
     Driver("Driver A", 3.0, "SOFT"),
@@ -64,11 +71,19 @@ while True:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_p:
                 driver = selected_driver # vybírání jezdce
+                driver.pit_error = random.random() < 0.15 # chyba při vjezdu do boxu
                 
-                if not driver.in_pit:
+                # pitstopy
+                can_pit = (
+                    not driver.in_pit and driver.current_lap - driver.last_pit_lap >= driver.pit_cooldown_laps
+                )
+                
+                if can_pit:
                     driver.in_pit = True
                     driver.pit_timer = 0.0
                     print(f"{driver.name} entering pit lane")
+                else:
+                    print(f"{driver.name} cannot pit yet")
             
             if event.key == pygame.K_UP: # výběr jezdce nahoru
                 idx = drivers.index(selected_driver)
@@ -83,8 +98,22 @@ while True:
                 if idx >= len(drivers):
                     idx = 0
                 selected_driver = drivers[idx]
+            # výběr pneu    
+            if event.key == pygame.K_1:
+                selected_driver.next_tire = "SOFT"
+                print(f"{selected_driver.name} selected SOFT")
+                
+            if event.key == pygame.K_2:
+                selected_driver.next_tire = "MEDIUM"
+                print(f"{selected_driver.name} selected MEDIUM")
+                
+            if event.key == pygame.K_3:
+                selected_driver.next_tire = "HARD"
+                print(f"{selected_driver.name} selected HARD")
+                
             
-    #update
+            
+    # update
     if game_state == GAME_STATE_RACE:
         race_time += delta_time
         
@@ -96,18 +125,27 @@ while True:
 
                 if d.pit_timer >= PIT_TIME:
                     d.in_pit = False
-                    d.tire = "MEDIUM"
+                    d.tire = d.next_tire
                     d.tire_wear = 0.0
                     d.pit_timer = 0.0
+                    d.last_pit_lap = d.current_lap
                     print(f"{d.name} pit stop completed")
 
                 continue
             
-            #normal lap
+            # normal lap / výpočet kola
             d.lap_timer += delta_time
             
             tire_data = TIRES[d.tire]
             degradation = d.tire_wear * 0.5
+            if d.tire_wear > 0.7:
+                degradation += 0.3
+            if d.tire_wear > 0.9:
+                if random.random() < 0.02
+                print(f"⚠️ {d.name} tyre issue!")
+                d.total_time += 2.0
+                degradation += 0.8
+            
             variation = random.uniform(-0.1, 0.1)
             
             current_lap_time = (
@@ -123,29 +161,35 @@ while True:
                 d.total_time += current_lap_time
                 d.tire_wear += tire_data["wear"]
                 
-        #pořadí
+        # pořadí
         drivers.sort(key=lambda d: (-d.current_lap, d.total_time))
             
-    #draw
+    # draw
     screen.fill((20,20,20,))
     
-    #čas závodu
+        # čas závodu
     time_text = font.render(f"Race time: {race_time:.1f}s", True, (255,255,255))
     screen.blit(time_text, (20,20))
     
-    #jezdci
+        # jezdci
     y = 60
     for i,d in enumerate(drivers):
         
-        status = "PIT" if d.in_pit else d.tire
+        if d.in_pit:
+            status = f"PIT → {d.next_tire}"
+        else:
+            status = d.tire
+            
         is_selected = (d == selected_driver)
         
         color = (0, 255, 0) if is_selected else (
             (255, 200, 100) if d.in_pit else (200,200,200)
         )
         
+        cooldown_left = max(0, d.pit_cooldown_laps - (d.current_lap - d.last_pit_lap))
+        
         text = font.render(
-            f"P{i+1} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s",
+            f"P{i+1} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s | Cooldown: {cooldown_left}",
             True,
             color
         )
@@ -153,5 +197,4 @@ while True:
         y += 30
     
     pygame.display.flip()
-    
     
