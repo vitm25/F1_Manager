@@ -44,9 +44,10 @@ drivers = [
     Driver("Driver A", 3.0, "SOFT"),
     Driver("Driver B", 3.1, "MEDIUM"),
     Driver("Driver C", 3.2, "HARD"),
-]
+    ]
            
 PIT_TIME = 5.0
+selected_driver = drivers[0]
 
 # vykreslovaci smycka
 while True:
@@ -62,12 +63,26 @@ while True:
             
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_p:
-                driver = drivers[0] #zatím jen první jezdec
+                driver = selected_driver # vybírání jezdce
                 
                 if not driver.in_pit:
                     driver.in_pit = True
                     driver.pit_timer = 0.0
                     print(f"{driver.name} entering pit lane")
+            
+            if event.key == pygame.K_UP: # výběr jezdce nahoru
+                idx = drivers.index(selected_driver)
+                idx -= 1
+                if idx < 0:
+                    idx = len(drivers) - 1
+                selected_driver = drivers[idx]
+                    
+            if event.key == pygame.K_DOWN: # výběr jezdce dolu
+                idx = drivers.index(selected_driver)
+                idx += 1
+                if idx >= len(drivers):
+                    idx = 0
+                selected_driver = drivers[idx]
             
     #update
     if game_state == GAME_STATE_RACE:
@@ -120,13 +135,19 @@ while True:
     
     #jezdci
     y = 60
-    for i,d in enumerate(drivers, start=1):
+    for i,d in enumerate(drivers):
+        
         status = "PIT" if d.in_pit else d.tire
+        is_selected = (d == selected_driver)
+        
+        color = (0, 255, 0) if is_selected else (
+            (255, 200, 100) if d.in_pit else (200,200,200)
+        )
         
         text = font.render(
-            f"P{i} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s",
+            f"P{i+1} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s",
             True,
-            (255,200,100) if d.in_pit else (200,200,200)
+            color
         )
         screen.blit(text, (20, y))
         y += 30
