@@ -123,12 +123,17 @@ while True:
             if d.in_pit:
                 d.pit_timer += delta_time
 
-                if d.pit_timer >= PIT_TIME:
+                required_pit_time = PIT_TIME
+                if d.pit_error:
+                    required_pit_time += 2.0
+                    
+                if d.pit_timer >= required_pit_time:
                     d.in_pit = False
                     d.tire = d.next_tire
                     d.tire_wear = 0.0
                     d.pit_timer = 0.0
                     d.last_pit_lap = d.current_lap
+                    d.pit_error = False
                     print(f"{d.name} pit stop completed")
 
                 continue
@@ -140,11 +145,11 @@ while True:
             degradation = d.tire_wear * 0.5
             if d.tire_wear > 0.7:
                 degradation += 0.3
+                
             if d.tire_wear > 0.9:
-                if random.random() < 0.02
-                print(f"⚠️ {d.name} tyre issue!")
-                d.total_time += 2.0
-                degradation += 0.8
+                if random.random() < 0.02:
+                    print(f"⚠️ {d.name} tyre issue!")
+                    d.total_time += 2.0
             
             variation = random.uniform(-0.1, 0.1)
             
@@ -183,8 +188,11 @@ while True:
         is_selected = (d == selected_driver)
         
         color = (0, 255, 0) if is_selected else (
-            (255, 200, 100) if d.in_pit else (200,200,200)
-        )
+            (255, 200, 100) if d.in_pit else (200,200,200))
+        if d.tire_wear > 0.9:
+            color = (255, 50, 50)
+        elif d.tire_wear > 0.7:
+            color = (255, 150, 50)
         
         cooldown_left = max(0, d.pit_cooldown_laps - (d.current_lap - d.last_pit_lap))
         
