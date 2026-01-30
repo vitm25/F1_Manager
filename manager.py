@@ -46,7 +46,6 @@ drivers = [
     Driver("Driver C", 3.2, "HARD"),
 ]
            
-lap_timer = 0.0
 PIT_TIME = 5.0
 
 # vykreslovaci smycka
@@ -66,7 +65,7 @@ while True:
                 driver = drivers[0] #zatím jen první jezdec
                 
                 if not driver.in_pit:
-                    driver.in_pit = Trueh
+                    driver.in_pit = True
                     driver.pit_timer = 0.0
                     print(f"{driver.name} entering pit lane")
             
@@ -75,23 +74,24 @@ while True:
         race_time += delta_time
         
         for d in drivers:
-            drivers.sort(
-                key=lambda d: (-d.current_lap, d.total_time)
-            )
             
+            # pit stop
             if d.in_pit:
-                d.lap_timer += delta_time
-                
+                d.pit_timer += delta_time
+
                 if d.pit_timer >= PIT_TIME:
                     d.in_pit = False
                     d.tire = "MEDIUM"
                     d.tire_wear = 0.0
+                    d.pit_timer = 0.0
                     print(f"{d.name} pit stop completed")
-                    
-                continue 
+
+                continue
+            
+            #normal lap
+            d.lap_timer += delta_time
             
             tire_data = TIRES[d.tire]
-            
             degradation = d.tire_wear * 0.5
             variation = random.uniform(-0.1, 0.1)
             
@@ -108,20 +108,17 @@ while True:
                 d.total_time += current_lap_time
                 d.tire_wear += tire_data["wear"]
                 
-    #eventy
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+        #pořadí
+        drivers.sort(key=lambda d: (-d.current_lap, d.total_time))
             
-        
-                        
     #draw
     screen.fill((20,20,20,))
     
+    #čas závodu
     time_text = font.render(f"Race time: {race_time:.1f}s", True, (255,255,255))
     screen.blit(time_text, (20,20))
     
-    
+    #jezdci
     y = 60
     for i,d in enumerate(drivers, start=1):
         status = "PIT" if d.in_pit else d.tire
