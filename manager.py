@@ -56,6 +56,19 @@ drivers = [
 PIT_TIME = 5.0
 selected_driver = drivers[0]
 
+#safety car/ VSC/ red flag
+safety_car_active = False
+safety_car_timer = 0.0
+SAFETY_CAR_DURATION = 8.0
+
+vsc_active = False
+vsc_timer = 0.0
+VSC_DURATION = 6.0
+
+red_flag_active = False
+red_flag_timer = 0.0
+RED_FLAG_DURATION = 5.0
+
 # vykreslovaci smycka
 while True:
     delta_time = clock.tick(FPS) / 1000
@@ -113,7 +126,43 @@ while True:
                 
             
             
-    # update
+# update
+    
+    if red_flag_active:
+        red_flag_timer += delta_time
+        
+        if red_flag_timer >= RED_FLAG_DURATION:
+            red_flag_active = False
+            print("🟢 RACE RESTART")
+            
+            for d in drivers:
+                d.tire = "MEDIUM"
+                d.next_tire = "MEDIUM"
+                d.tire_wear = 0.0
+        
+        continue 
+    
+    # red flag
+    if not safety_car_active and not vsc_active and not red_flag_active:
+        if random.random() < 0.0005:
+            red_flag_active = True
+            red_flag_timer = 0.0
+            print("🔴 RED FLAG")
+    
+    # VSC
+    if not safety_car_active and not vsc_active and not red_flag_active:
+        if random.random() < 0.0015:
+            vsc_active = True
+            vsc_timer = 0.0
+            print("🟣 VIRTUAL SAFETY CAR")
+    
+    #safety car
+    if not safety_car_active:
+        if random.random() < 0.001:
+            safety_car_active = True
+            safety_car_timer = 0.0
+            print("🚨 SAFETY CAR DEPLOYED")
+    
     if game_state == GAME_STATE_RACE:
         race_time += delta_time
         
@@ -124,6 +173,11 @@ while True:
                 d.pit_timer += delta_time
 
                 required_pit_time = PIT_TIME
+                if safety_car_active:
+                    required_pit_time -= 2.0
+                if vsc_active:
+                    required_pit_time -= 1.0
+                
                 if d.pit_error:
                     required_pit_time += 2.0
                     
@@ -138,6 +192,19 @@ while True:
 
                 continue
             
+            if safety_car_active:
+                safety_car_timer += delta_time
+                
+                if safety_car_timer >= SAFETY_CAR_DURATION:
+                    safety_car_active = False
+                    print("🟢 SAFETY CAR IN THIS LAP")
+                    
+            if vsc_active:
+                vsc_timer += delta_time
+                if vsc_timer >= VSC_DURATION:
+                    vsc_active = False
+                    print("🟢 VSC ENDING")
+                    
             # normal lap / výpočet kola
             d.lap_timer += delta_time
             
@@ -166,11 +233,39 @@ while True:
                 d.total_time += current_lap_time
                 d.tire_wear += tire_data["wear"]
                 
+            current_lap_time = (
+                d.base_lap_time +
+                tire_data["pace"] +
+                degradation +
+                variation
+            )
+            
+            if safety_car_active:
+                current_lap_time += 1.5
+                
+            if vsc_active:
+                current_lap_time += 0.8
+                
         # pořadí
         drivers.sort(key=lambda d: (-d.current_lap, d.total_time))
             
     # draw
     screen.fill((20,20,20,))
+    
+        #safety car
+    if safety_car_active:
+        sc_text = font.render("SAFETY CAR DEPLOYED", True, (255, 255, 0))
+        screen.blit(sc_text, (350, 20))
+        
+        # VSC
+    if vsc_active:
+        vsc_text = font.render("VIRTUAL SAFETY CAR", True, (200, 0, 255))
+        screen.blit(vsc_text, (350, 50))
+        
+        # red flag
+    if red_flag_active:
+        rf_text = font.render("RED FLAG", True, (255, 0, 0))
+        screen.blit(rf_text, (350, 80))
     
         # čas závodu
     time_text = font.render(f"Race time: {race_time:.1f}s", True, (255,255,255))
@@ -187,6 +282,7 @@ while True:
             
         is_selected = (d == selected_driver)
         
+        #barvičky
         color = (0, 255, 0) if is_selected else (
             (255, 200, 100) if d.in_pit else (200,200,200))
         if d.tire_wear > 0.9:
