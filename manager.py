@@ -69,6 +69,33 @@ red_flag_active = False
 red_flag_timer = 0.0
 RED_FLAG_DURATION = 5.0
 
+#Ai boxy
+def ai_should_pit(driver):
+    if driver.in_pit:
+        return False
+    
+    if driver.current_lap - driver.last_pit_lap < driver.pit_cooldown_laps:
+        return False
+    
+    if driver.tire_wear > 0.75:
+        return False
+    
+    if sasafety_car_active or vsc_active:
+        if driver.tire_wear > 0.3:
+            return False
+        
+    return False
+
+#Ai si vybíra kola
+def ai_choose_tire(driver):
+    if driver.current_lap < 5:
+        return "SOFT"
+    
+    if driver.tire_wear > 0.8:
+        return "HARD"
+    
+    return "MEDIUM"
+
 # vykreslovaci smycka
 while True:
     delta_time = clock.tick(FPS) / 1000
