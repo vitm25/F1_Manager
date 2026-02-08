@@ -8,6 +8,10 @@ rozliseni_okna = (1000, 600)
 barvy_pozadi = (0, 0, 0,)
 FPS = 60
 
+RACE_LAPS = 2
+race_finished = False
+points_awarded = False
+
 #vykreslení okna
 screen = pygame.display.set_mode(rozliseni_okna)
 pygame.display.set_caption("F1 manažer")
@@ -25,6 +29,8 @@ TIRES = {
     "MEDIUM": {"pace": 0.0, "wear": 0.025},
     "HARD": {"pace": 0.3, "wear": 0.015}
 }
+
+POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
 
 class Driver: # jezdec
     def __init__(self, name, base_lap_time, tire):
@@ -45,7 +51,9 @@ class Driver: # jezdec
         self.last_pit_lap = -999
         self.pit_cooldown_laps = 2
         
-        self.pit_error = False 
+        self.pit_error = False
+        
+        self.points = 0
 
 drivers = [
     Driver("Driver A", 3.0, "SOFT"),
@@ -78,7 +86,7 @@ def ai_should_pit(driver):
         return False
     
     if driver.tire_wear > 0.75:
-        return False
+        return True 
     
     if safety_car_active or vsc_active:
         if driver.tire_wear > 0.3:
@@ -154,9 +162,9 @@ while True:
             
             
 # update
-    if red_flag_active:
+    if game_state == "FINISHED":
         continue
-    
+
     if red_flag_active:
         red_flag_timer += delta_time
         
@@ -283,8 +291,25 @@ while True:
             if vsc_active:
                 current_lap_time += 0.8
                 
-        # pořadí
-        drivers.sort(key=lambda d: (-d.current_lap, d.total_time))
+        leader = max(drivers, key=lambda d: d.current_lap)
+        
+        if d.current_lap >= RACE_LAPS:
+            race_finished = True
+            
+        if race_finished and not points_awarded:        
+            # pořadí
+            drivers.sort(key=lambda d: (-d.current_lap, d.total_time))
+            # body
+            for i, d in enumerate(drivers):
+                if i < len(POINTS):
+                    d.points += POINTS[i]
+                    
+            print("🏁 RACE FINISHED")
+            for d in drivers:
+                print(f"{d.name}: {d.points} pts")
+                
+            points_awarded = True
+            game_state = "FINISHED"
             
     # draw
     screen.fill((20,20,20,))
@@ -330,12 +355,18 @@ while True:
         
         cooldown_left = max(0, d.pit_cooldown_laps - (d.current_lap - d.last_pit_lap))
         
+        #jezdec
         text = font.render(
-            f"{ai_mark} P{i} | P{i+1} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s | Cooldown: {cooldown_left}",
+            f"{ai_mark} P{i+1} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s | Cooldown: {cooldown_left} | PTS: {d.points}",
             True,
             color
         )
         screen.blit(text, (20, y))
         y += 30
+        
+        #race finished
+        if game_state == "FINISHED":
+            end_text = font.render("RACE FINISHED", True, (0, 255, 0))
+            screen.blit(end_text, (400, 300))
     
     pygame.display.flip()
