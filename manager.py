@@ -80,7 +80,7 @@ def ai_should_pit(driver):
     if driver.tire_wear > 0.75:
         return False
     
-    if sasafety_car_active or vsc_active:
+    if safety_car_active or vsc_active:
         if driver.tire_wear > 0.3:
             return False
         
@@ -154,6 +154,8 @@ while True:
             
             
 # update
+    if red_flag_active:
+        continue
     
     if red_flag_active:
         red_flag_timer += delta_time
@@ -232,6 +234,14 @@ while True:
                     vsc_active = False
                     print("🟢 VSC ENDING")
                     
+            #spuštění AI rozhodnutí
+            if d != selected_driver:
+                if ai_should_pit(d):
+                    d.in_pit = True
+                    d.pit_timer = 0.0
+                    d.next_tire = ai_choose_tire(d)
+                    print(f"🤖 {d.name} pits for {d.next_tire}")
+                    
             # normal lap / výpočet kola
             d.lap_timer += delta_time
             
@@ -309,9 +319,10 @@ while True:
             
         is_selected = (d == selected_driver)
         
+        ai_mark = "🤖" if d != selected_driver else ""
+        
         #barvičky
-        color = (0, 255, 0) if is_selected else (
-            (255, 200, 100) if d.in_pit else (200,200,200))
+        color = (0, 255, 0) if is_selected else ((255, 200, 100) if d.in_pit else (200,200,200))
         if d.tire_wear > 0.9:
             color = (255, 50, 50)
         elif d.tire_wear > 0.7:
@@ -320,7 +331,7 @@ while True:
         cooldown_left = max(0, d.pit_cooldown_laps - (d.current_lap - d.last_pit_lap))
         
         text = font.render(
-            f"P{i+1} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s | Cooldown: {cooldown_left}",
+            f"{ai_mark} P{i} | P{i+1} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s | Cooldown: {cooldown_left}",
             True,
             color
         )
@@ -328,4 +339,3 @@ while True:
         y += 30
     
     pygame.display.flip()
-    
