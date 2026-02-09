@@ -21,6 +21,10 @@ clock = pygame.time.Clock()
 GAME_STATE_RACE = "RACE"
 game_state = GAME_STATE_RACE
 
+current_weather = "SUN"
+weather_timer = 0.0
+WEATHER_CHANGE_TIME = 12.0
+
 race_time = 0.0
 font = pygame.font.SysFont(None, 36)
 
@@ -31,6 +35,12 @@ TIRES = {
 }
 
 POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
+
+WEATHER_TYPES = {
+    "SUN": {"lap_modifier": 0.0, "wear_modifier": 1.0},
+    "CLOUD": {"lap_modifier": 0.1, "wear_modifier": 1.1},
+    "RAIN": {"lap_modifier": 0.8, "wear_modifier": 1.6},
+}
 
 class Driver: # jezdec
     def __init__(self, name, base_lap_time, tire):
@@ -250,6 +260,22 @@ while True:
                     d.next_tire = ai_choose_tire(d)
                     print(f"🤖 {d.name} pits for {d.next_tire}")
                     
+            #počasí
+            weather_timer += delta_time
+            
+            if weather_timer >= WEATHER_CHANGE_TIME:
+                weather_timer = 0.0
+                
+                roll = random.random()
+                if roll < 0.6:
+                    current_weather = "SUN"
+                elif roll < 0.85:
+                    current_weather = "CLOUD"
+                else:
+                    current_weather = "RAIN"
+                    
+                print(f"Weather changed to {current_weather}")
+            
             # normal lap / výpočet kola
             d.lap_timer += delta_time
             
