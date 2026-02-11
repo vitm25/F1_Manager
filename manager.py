@@ -31,7 +31,9 @@ font = pygame.font.SysFont(None, 36)
 TIRES = {
     "SOFT": {"pace": -0.3, "wear": 0.04},
     "MEDIUM": {"pace": 0.0, "wear": 0.025},
-    "HARD": {"pace": 0.3, "wear": 0.015}
+    "HARD": {"pace": 0.3, "wear": 0.015},
+    "INTER": {"pace": 0.6, "wear": 0.02},
+    "WET": {"pace": 1.0, "wear": 0.018},
 }
 
 POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
@@ -101,6 +103,12 @@ def ai_should_pit(driver):
     if safety_car_active or vsc_active:
         if driver.tire_wear > 0.3:
             return False
+    
+    if current_weather == "RAIN" and driver.tire not in ["INTER", "WET"]:
+        return True
+    
+    if current_weather == "SUN" and driver.tire in ["INTER", "WET"]:
+        return True 
         
     return False
 
@@ -168,6 +176,15 @@ while True:
             if event.key == pygame.K_3:
                 selected_driver.next_tire = "HARD"
                 print(f"{selected_driver.name} selected HARD")
+            
+            if event.key == pygame.K_4:
+                selected_driver.next_tire = "INTER"
+                print(f"{selected_driver.name} selected INTER")
+            
+            if event.key == pygame.K_5:
+                selected_driver.next_tire = "WET"
+                print(f"{selected_driver.name} selected WET")
+            
                 
             
             
@@ -300,6 +317,21 @@ while True:
                 variation +
                 weather_data["lap_modifier"]
             )
+            
+            #penalizace za špatné pneumatiky
+            if current_weather == "RAIN":
+                if d.tire in ["SOFT", "MEDIUM", "HARD"]:
+                    current_lap_time += 2.5
+            elif current_weather == "SUN":
+                if d.tire in ["INTER", "WET"]:
+                    current_lap_time += 1.5
+                    
+            #riziko nehod
+            if current_weather == "RAIN":
+                if d.tire in ["SOFT", "MEDIUM", "HARD"]:
+                    if random.random() < 0.01:
+                        print(f" {d.name} crashed on slicks in rain!")
+                        d.total_time +=2.0
             
             if d.lap_timer >= current_lap_time:
                 d.lap_timer -= current_lap_time
