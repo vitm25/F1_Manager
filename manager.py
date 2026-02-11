@@ -291,18 +291,21 @@ while True:
             
             variation = random.uniform(-0.1, 0.1)
             
+            weather_data = WEATHER_TYPES[current_weather]
+            
             current_lap_time = (
                 d.base_lap_time +
                 tire_data["pace"] +
                 degradation +
-                variation
+                variation +
+                weather_data["lap_modifier"]
             )
             
             if d.lap_timer >= current_lap_time:
                 d.lap_timer -= current_lap_time
                 d.current_lap += 1
                 d.total_time += current_lap_time
-                d.tire_wear += tire_data["wear"]
+                d.tire_wear += tire_data["wear"] * weather_data["wear_modifier"]
                 
             current_lap_time = (
                 d.base_lap_time +
@@ -358,6 +361,10 @@ while True:
         # čas závodu
     time_text = font.render(f"Race time: {race_time:.1f}s", True, (255,255,255))
     screen.blit(time_text, (20,20))
+    
+        #počasí
+    weather_text = font.render(f"Weather: {current_weather}", True, (100, 200, 255))
+    screen.blit(weather_text, (20,45))
     
         # jezdci
     y = 60
