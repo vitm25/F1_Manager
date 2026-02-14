@@ -114,6 +114,12 @@ def ai_should_pit(driver):
 
 #Ai si vybíra kola
 def ai_choose_tire(driver):
+    
+    if current_weather == "RAIN":
+        if random.random() < 0.5:
+            return "INTER"
+        return "WET"
+    
     if driver.current_lap < 5:
         return "SOFT"
     
@@ -395,7 +401,14 @@ while True:
     screen.blit(time_text, (20,20))
     
         #počasí
-    weather_text = font.render(f"Weather: {current_weather}", True, (100, 200, 255))
+    if current_weather == "SUN":
+        weather_color = (255, 255, 0)
+    elif current_weather == "CLOUD":
+        weather_color = (180, 180, 180)
+    else:
+        weather_color = (100, 150, 255)
+    
+    weather_text = font.render(f"Weather: {current_weather}", True, weather_color)
     screen.blit(weather_text, (20,45))
     
         # jezdci
