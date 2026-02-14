@@ -128,6 +128,30 @@ def ai_choose_tire(driver):
     
     return "MEDIUM"
 
+# body z šampionát
+def award_championship_points(drivers):
+    # seřadíme podle času
+    results = sorted(drivers, key=lambda d:total_time)
+    
+    for i, driver in enumerate(results):
+        if i < len(POINTS):
+            pts = POINTS[i]
+            driver.points += pts
+            print(f"{driver.name} scored {pts} points")
+            
+#reset závodu
+def reset_race(drivers):
+    
+    global points_awarded
+    points_awarded = False
+    
+    for d in drivers:
+        d.toral_time = 0
+        d.current_lap = 0
+        d.tire_wear = 0
+        d.in_pit = False
+        d.finished = False
+
 # vykreslovaci smycka
 while True:
     delta_time = clock.tick(FPS) / 1000
@@ -377,6 +401,11 @@ while True:
                 
             points_awarded = True
             game_state = "FINISHED"
+            
+            # body do šampionátu
+        if race_finished and not points_awarded:
+            award_championship_points(drivers)
+            points_awarded = True
             
     # draw
     screen.fill((20,20,20,))
