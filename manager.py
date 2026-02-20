@@ -19,6 +19,10 @@ pygame.display.set_caption("F1 manažer")
 
 clock = pygame.time.Clock()
 
+GAME_STATE_MENU = "MENU"
+GAME_STATE_CHAMPIONSHIP = "CHAMPIONSHIP"
+GAME_STATE_PRACTICE = "PRACTICE"
+GAME_STATE_SETTINGS = "SETTINGS"
 GAME_STATE_RACE = "RACE"
 game_state = GAME_STATE_RACE
 
