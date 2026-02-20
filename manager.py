@@ -132,7 +132,7 @@ def ai_choose_tire(driver):
 # body z šampionát
 def award_championship_points(drivers):
     # seřadíme podle času
-    results = sorted(drivers, key=lambda d:total_time)
+    results = sorted(drivers, key=lambda d: d.total_time)
     
     for i, driver in enumerate(results):
         if i < len(POINTS):
@@ -147,7 +147,7 @@ def reset_race(drivers):
     points_awarded = False
     
     for d in drivers:
-        d.toral_time = 0
+        d.total_time = 0
         d.current_lap = 0
         d.tire_wear = 0
         d.in_pit = False
@@ -386,14 +386,13 @@ while True:
                 
         leader = max(drivers, key=lambda d: d.current_lap)
         
-        if d.current_lap >= RACE_LAPS:
-            race_finished = True
+        race_finished = all(d.current_lap >= RACE_LAPS for d in drivers)
             
         if race_finished and not points_awarded:        
             # pořadí
-            drivers.sort(key=lambda d: (-d.current_lap, d.total_time))
+            race_results = sorted(drivers, key=lambda d: (-d.current_lap, d.total_time))
             # body
-            for i, d in enumerate(drivers):
+            for i, d in enumerate(race_results):
                 if i < len(POINTS):
                     d.points += POINTS[i]
                     
@@ -473,24 +472,24 @@ while True:
         )
         screen.blit(text, (20, y))
         y += 30
+
+        # šampionát
+    championship = sorted(drivers, key=lambda d: d.points, reverse=True)
+    
+    title = font.render("CHAMPIONSHIP", True, (255, 255, 255))      
+    screen.blit(title, (700, 80))
+    
+    y = 120
+    for i, d in enumerate(championship):
+        text = font.render(f"{i+1}. {d.name} - {d.points} pts", True, (220, 220, 220))
+        screen.blit(text, (700, y))
+        y += 30
         
+                
         #race finished
         if game_state == "FINISHED":
             end_text = font.render("RACE FINISHED", True, (0, 255, 0))
             screen.blit(end_text, (400, 300))
             
-        # šampionát
-        championship = sorted(drivers, key=lambda d: d.points, reverse=True )
-        
-        y = 120
-        title = font.render("CHAMPIONSHIP", True, (255, 255, 255))
-        CHAMP_X = 700
-        
-        screen.blit(title, (CHAMP_X, 80))
-        
-        for i, d in enumerate(championship):
-            text = font.render(f"{i+1}. {d.name} - {d.points} pts", True, (255, 255, 255))
-        screen.blit(text, (CHAMP_X, y))
-        y += 25
     
     pygame.display.flip()
