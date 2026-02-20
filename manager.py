@@ -7,6 +7,7 @@ pygame.init() # spusteni knihovny
 rozliseni_okna = (1000, 600)
 barvy_pozadi = (0, 0, 0,)
 FPS = 60
+RACE_ARE_WIDTH = 650
 
 RACE_LAPS = 2
 race_finished = False
@@ -26,7 +27,7 @@ weather_timer = 0.0
 WEATHER_CHANGE_TIME = 12.0
 
 race_time = 0.0
-font = pygame.font.SysFont(None, 36)
+font = pygame.font.SysFont("arial", 28)
 
 TIRES = {
     "SOFT": {"pace": -0.3, "wear": 0.04},
@@ -214,9 +215,10 @@ while True:
             if event.key == pygame.K_5:
                 selected_driver.next_tire = "WET"
                 print(f"{selected_driver.name} selected WET")
-            
-                
-            
+            # další závod
+            if event.key == pygame.K_n:
+                reset_race(drivers)
+                print("Next race started!")
             
 # update
     if game_state == "FINISHED":
@@ -409,6 +411,7 @@ while True:
             
     # draw
     screen.fill((20,20,20,))
+    pygame.draw.line(screen, (80, 80, 80), (680,0), (680,600), 2)
     
         #safety car
     if safety_car_active:
@@ -464,7 +467,7 @@ while True:
         
         #jezdec
         text = font.render(
-            f"{ai_mark} P{i+1} | {d.name} | {status} | {d.tire} | Wear: {int(d.tire_wear*100)}% Lap: {d.current_lap} | Time: {d.total_time:.1f}s | Cooldown: {cooldown_left} | PTS: {d.points}",
+            f"P{i} {d.name} | {status} | L{d.current_lap} | {d.total_time:.1f}s | {d.points}pts",
             True,
             color
         )
@@ -475,5 +478,19 @@ while True:
         if game_state == "FINISHED":
             end_text = font.render("RACE FINISHED", True, (0, 255, 0))
             screen.blit(end_text, (400, 300))
+            
+        # šampionát
+        championship = sorted(drivers, key=lambda d: d.points, reverse=True )
+        
+        y = 120
+        title = font.render("CHAMPIONSHIP", True, (255, 255, 255))
+        CHAMP_X = 700
+        
+        screen.blit(title, (CHAMP_X, 80))
+        
+        for i, d in enumerate(championship):
+            text = font.render(f"{i+1}. {d.name} - {d.points} pts", True, (255, 255, 255))
+        screen.blit(text, (CHAMP_X, y))
+        y += 25
     
     pygame.display.flip()
