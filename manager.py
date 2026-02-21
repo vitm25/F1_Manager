@@ -22,12 +22,11 @@ clock = pygame.time.Clock()
 
 # tlačítka
 buttons = [
-    {"text": "Championship", "rect": pygame.Rect(300, 200, 300, 60), "action": "championship"},
-    {"text": "Free Practice", "rect": pygame.Rect(300, 280, 300, 60), "action": "practice"},
-    {"text": "Settings", "rect": pygame.Rect(300, 360, 300, 60), "action": "settings"}
+    {"text": "CHAMPIONSHIP", "rect": pygame.Rect(300, 200, 300, 60), "action": GAME_STATE_CHAMPIONSHIP},
+    {"text": "PRACTICE", "rect": pygame.Rect(300, 280, 300, 60), "action": GAME_STATE_PRACTICE},
+    {"text": "SETTINGS", "rect": pygame.Rect(300, 360, 300, 60), "action": GAME_STATE_SETTINGS}
 ]
 
-print(buttons[0]["rect"])
 GAME_STATE_MENU = "MENU"
 GAME_STATE_CHAMPIONSHIP = "CHAMPIONSHIP"
 GAME_STATE_PRACTICE = "PRACTICE"
@@ -172,6 +171,7 @@ selected_menu_index = 0
 
 def draw_menu():
     screen.fill((20,20,20))
+    mouse_pos = pygame.mouse.get_pos()
     
     for btn in buttons:
         
@@ -208,7 +208,7 @@ while True:
             mouse_pos = pygame.mouse.get_pos()
             
             for btn in buttons:
-                if btn["rect"]. collidepoint(mouse_pos):
+                if btn["rect"].collidepoint(mouse_pos):
                     game_state = btn["action"]
                 # pitstopy
                 can_pit = (
@@ -285,19 +285,6 @@ while True:
                 if chosen == "Settings":
                     game_state = GAME_STATE_SETTING
                     
-        if game_state == "menu":
-            draw_menu()
-        
-        elif game_state == "championship":
-            screen.fill((0,100,0))
-            
-        elif game_state == "practice":
-            screen.fill((0,0,100))
-            
-        elif game_state == "settings":
-            screen.fill((100,0,0))
-        
-        pygame.display.flip()
 # update
     if game_state == "FINISHED":
         continue
@@ -492,103 +479,98 @@ while True:
     
         # menu
     if game_state == GAME_STATE_MENU:
-        
-        screen.fill((15,15,15))
-        
-        title = font.render("F1 MANAGER", True, (255,255,255))
-        screen.blit(title, (350,100))
-        
-        y = 200
-        for i, option in enumerate(menu_options):
-            
-            color = (0,255,0) if i == selected_menu_index else (200,200,200)
-            
-            text = font.render(option, True, color)
-            screen.blit(text, (380, y))
-            
-            y += 50
-            
+        draw_menu()
         pygame.display.flip()
-        continue 
-    
-        #safety car
-    if safety_car_active:
-        sc_text = font.render("SAFETY CAR DEPLOYED", True, (255, 255, 0))
-        screen.blit(sc_text, (350, 20))
+        continue
         
-        # VSC
-    if vsc_active:
-        vsc_text = font.render("VIRTUAL SAFETY CAR", True, (200, 0, 255))
-        screen.blit(vsc_text, (350, 50))
+    elif game_state == GAME_STATE_CHAMPIONSHIP:
+        screen.fill((0,100,0))
         
-        # red flag
-    if red_flag_active:
-        rf_text = font.render("RED FLAG", True, (255, 0, 0))
-        screen.blit(rf_text, (350, 80))
-    
-        # čas závodu
-    time_text = font.render(f"Race time: {race_time:.1f}s", True, (255,255,255))
-    screen.blit(time_text, (20,20))
-    
-        #počasí
-    if current_weather == "SUN":
-        weather_color = (255, 255, 0)
-    elif current_weather == "CLOUD":
-        weather_color = (180, 180, 180)
-    else:
-        weather_color = (100, 150, 255)
-    
-    weather_text = font.render(f"Weather: {current_weather}", True, weather_color)
-    screen.blit(weather_text, (20,45))
-    
-        # jezdci
-    y = 60
-    for i,d in enumerate(drivers):
+    elif game_state == GAME_STATE_PRACTICE:
+        screen.fill((0,0,100))
         
-        if d.in_pit:
-            status = f"PIT → {d.next_tire}"
+    elif game_state == GAME_STATE_SETTINGS:
+        screen.fill((100,0,0))
+    
+    elif game_state == GAME_STATE_RACE:
+    
+            #safety car
+        if safety_car_active:
+            sc_text = font.render("SAFETY CAR DEPLOYED", True, (255, 255, 0))
+            screen.blit(sc_text, (350, 20))
+            
+            # VSC
+        if vsc_active:
+            vsc_text = font.render("VIRTUAL SAFETY CAR", True, (200, 0, 255))
+            screen.blit(vsc_text, (350, 50))
+            
+            # red flag
+        if red_flag_active:
+            rf_text = font.render("RED FLAG", True, (255, 0, 0))
+            screen.blit(rf_text, (350, 80))
+        
+            # čas závodu
+        time_text = font.render(f"Race time: {race_time:.1f}s", True, (255,255,255))
+        screen.blit(time_text, (20,20))
+        
+            #počasí
+        if current_weather == "SUN":
+            weather_color = (255, 255, 0)
+        elif current_weather == "CLOUD":
+            weather_color = (180, 180, 180)
         else:
-            status = d.tire
+            weather_color = (100, 150, 255)
+        
+        weather_text = font.render(f"Weather: {current_weather}", True, weather_color)
+        screen.blit(weather_text, (20,45))
+        
+            # jezdci
+        y = 60
+        for i,d in enumerate(drivers):
             
-        is_selected = (d == selected_driver)
-        
-        ai_mark = "🤖" if d != selected_driver else ""
-        
-        #barvičky
-        color = (0, 255, 0) if is_selected else ((255, 200, 100) if d.in_pit else (200,200,200))
-        if d.tire_wear > 0.9:
-            color = (255, 50, 50)
-        elif d.tire_wear > 0.7:
-            color = (255, 150, 50)
-        
-        cooldown_left = max(0, d.pit_cooldown_laps - (d.current_lap - d.last_pit_lap))
-        
-        #jezdec
-        text = font.render(
-            f"P{i} {d.name} | {status} | L{d.current_lap} | {d.total_time:.1f}s | {d.points}pts",
-            True,
-            color
-        )
-        screen.blit(text, (20, y))
-        y += 30
-
-        # šampionát
-    championship = sorted(drivers, key=lambda d: d.points, reverse=True)
-    
-    title = font.render("CHAMPIONSHIP", True, (255, 255, 255))      
-    screen.blit(title, (700, 80))
-    
-    y = 120
-    for i, d in enumerate(championship):
-        text = font.render(f"{i+1}. {d.name} - {d.points} pts", True, (220, 220, 220))
-        screen.blit(text, (700, y))
-        y += 30
-        
+            if d.in_pit:
+                status = f"PIT → {d.next_tire}"
+            else:
+                status = d.tire
                 
-        #race finished
-        if game_state == "FINISHED":
-            end_text = font.render("RACE FINISHED", True, (0, 255, 0))
-            screen.blit(end_text, (400, 300))
+            is_selected = (d == selected_driver)
             
-    
-    pygame.display.flip()
+            ai_mark = "🤖" if d != selected_driver else ""
+            
+            #barvičky
+            color = (0, 255, 0) if is_selected else ((255, 200, 100) if d.in_pit else (200,200,200))
+            if d.tire_wear > 0.9:
+                color = (255, 50, 50)
+            elif d.tire_wear > 0.7:
+                color = (255, 150, 50)
+            
+            cooldown_left = max(0, d.pit_cooldown_laps - (d.current_lap - d.last_pit_lap))
+            
+            #jezdec
+            text = font.render(
+                f"P{i} {d.name} | {status} | L{d.current_lap} | {d.total_time:.1f}s | {d.points}pts",
+                True,
+                color
+            )
+            screen.blit(text, (20, y))
+            y += 30
+
+            # šampionát
+        championship = sorted(drivers, key=lambda d: d.points, reverse=True)
+        
+        title = font.render("CHAMPIONSHIP", True, (255, 255, 255))      
+        screen.blit(title, (700, 80))
+        
+        y = 120
+        for i, d in enumerate(championship):
+            text = font.render(f"{i+1}. {d.name} - {d.points} pts", True, (220, 220, 220))
+            screen.blit(text, (700, y))
+            y += 30
+                    
+            #race finished
+            if game_state == "FINISHED":
+                end_text = font.render("RACE FINISHED", True, (0, 255, 0))
+                screen.blit(end_text, (400, 300))
+                
+print(game_state)
+pygame.display.flip()
