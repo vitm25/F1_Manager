@@ -12,7 +12,7 @@ RACE_ARE_WIDTH = 650
 RACE_LAPS = 2
 race_finished = False
 points_awarded = False
-
+current_screen = None 
 
 #vykreslení okna
 screen = pygame.display.set_mode(rozliseni_okna)
@@ -184,8 +184,80 @@ def draw_menu():
         
         text = font.render(btn["text"], True, (255,255,255))
         screen.blit(text, (btn["rect"].x + 20, btn["rect"].y + 15))
+        
+class Screen:
+    def handle_events(self, events):
+        pass
+    
+    def update(self, dt):
+        pass
+    
+    def draw(self, screen):
+        pass
+    
+class MenuScreen(Screen):
+    # tlačítka
+    def __init__(self):
+        self.buttons = [
+            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(300, 200, 300, 60), "action": GAME_STATE_CHAMPIONSHIP},
+            {"text": "PRACTICE", "rect": pygame.Rect(300, 280, 300, 60), "action": GAME_STATE_PRACTICE},
+            {"text": "SETTINGS", "rect": pygame.Rect(300, 360, 300, 60), "action": GAME_STATE_SETTINGS}
+        ]
+    # eventy
+    def handle_events(self, events):
+        global current_screen
+        
+        for event in events:
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                
+                for btn in self.buttons:
+                    if btn["rect"].collidepoint(mouse_pos):
+                        change_screen(btn["action"])
+    # draw                    
+    def draw(self, screen):
+        screen.fill((15,15,15))
+        
+        title = font.render("F1 MANAGER", True, (255,255,255))
+        screen.blit(title, (350,100))
+        
+        for btn in self.buttons:
+            pygame.draw.rect(screen, (255,255,255), btn["rect"], 2)
+            
+            text = font.render(btn["text"], True, (255,255,255), btn["rect"], 2)
+            screen.blit(text, (btn["rect"].x+20, btn["rect"].y+15))
+            
+    #změna okna
+    def change_screen(state):
+        global current_screen
+        
+        if state == GAME_STATE_MENU:
+            current_screen = MenuScreen()
+            
+        elif state == GAME_STATE_RACE:
+            current_screen = RaceScreen()
+        
+        elif state == GAME_STATE_PRACTICE:
+            current_screen = PracticeScreen()
+            
+        elif state == GAME_STATE_SETTINGS:
+            current_screen = SettingsScreen()
+            
+class RaceScreen(Screen):
+    def draw(self, screen):
+        screen.fill((0,100,0))
+        
+class PracticeScreen(Screen):
+    def draw(self, screen):
+        screen.fill((0,0,100))
+        
+class SettingsScreen(Screen):
+    def draw(self, screen):
+        screen.fill((100,0,0))
+        
+change_screen(GAME_STATE_MENU)
 
-# vykreslovaci smycka
+# vykreslovaci smycka / main loop
 while True:
     delta_time = clock.tick(FPS) / 1000
     # kontrola probehlych udalosti
@@ -573,5 +645,4 @@ while True:
                 end_text = font.render("RACE FINISHED", True, (0, 255, 0))
                 screen.blit(end_text, (400, 300))
                 
-print(game_state)
 pygame.display.flip()
