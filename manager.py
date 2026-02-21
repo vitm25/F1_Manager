@@ -13,12 +13,21 @@ RACE_LAPS = 2
 race_finished = False
 points_awarded = False
 
+
 #vykreslení okna
 screen = pygame.display.set_mode(rozliseni_okna)
 pygame.display.set_caption("F1 manažer")
 
 clock = pygame.time.Clock()
 
+# tlačítka
+buttons = [
+    {"text": "Championship", "rect": pygame.Rect(300, 200, 300, 60), "action": "championship"},
+    {"text": "Free Practice", "rect": pygame.Rect(300, 200, 300, 60), "action": "practice"},
+    {"text": "Settings", "rect": pygame.Rect(300, 200, 300, 60), "action": "settings"}
+]
+
+print(buttons[0]["rect"])
 GAME_STATE_MENU = "MENU"
 GAME_STATE_CHAMPIONSHIP = "CHAMPIONSHIP"
 GAME_STATE_PRACTICE = "PRACTICE"
@@ -161,6 +170,21 @@ def reset_race(drivers):
 menu_options = ["Championship", "Free Practice", "Settings"]
 selected_menu_index = 0
 
+def draw_menu():
+    screen.fill((20,20,20))
+    
+    for btn in buttons:
+        
+        color = (255,255,255)
+        
+        if btn["rect"].collidepoint(mouse_pos):
+            color = (255,200,0)
+            
+        pygame.draw.rect(screen, color, btn["rect"], 2)
+        
+        text = font.render(btn["text"], True, (255,255,255))
+        screen.blit(text, (btn["rect"].x + 20, btn["rect"].y + 15))
+
 # vykreslovaci smycka
 while True:
     delta_time = clock.tick(FPS) / 1000
@@ -177,7 +201,15 @@ while True:
             if event.key == pygame.K_p:
                 driver = selected_driver # vybírání jezdce
                 driver.pit_error = random.random() < 0.15 # chyba při vjezdu do boxu
-                
+        
+        # menu myší
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            
+            mouse_pos = pygame.mouse.get_pos()
+            
+            for btn in buttons:
+                if btn["rect"]. collidepoint(mouse_pos):
+                    game_state = btn["action"]
                 # pitstopy
                 can_pit = (
                     not driver.in_pit and driver.current_lap - driver.last_pit_lap >= driver.pit_cooldown_laps
@@ -251,8 +283,21 @@ while True:
                         game_state = GAME_STATE_PRACTICE
                         
                     if chosen == "Settings":
-                        game_state = GAME_STATE_SETTINGS
+                        game_state = GAME_STATE_SETTING
+                        
+            if game_state == "menu":
+                draw_menu()
             
+            elif game_state == "championship":
+                screen.fill((0,100,0))
+                
+            elif game_state == "practice":
+                screen.fill((0,0,100))
+                
+            elif game_state == "settings":
+                screen.fill((100,0,0))
+            
+            pygame.display.flip()
 # update
     if game_state == "FINISHED":
         continue
