@@ -20,19 +20,19 @@ pygame.display.set_caption("F1 manažer")
 
 clock = pygame.time.Clock()
 
-# tlačítka
-buttons = [
-    {"text": "CHAMPIONSHIP", "rect": pygame.Rect(300, 200, 300, 60), "action": GAME_STATE_CHAMPIONSHIP},
-    {"text": "PRACTICE", "rect": pygame.Rect(300, 280, 300, 60), "action": GAME_STATE_PRACTICE},
-    {"text": "SETTINGS", "rect": pygame.Rect(300, 360, 300, 60), "action": GAME_STATE_SETTINGS}
-]
-
 GAME_STATE_MENU = "MENU"
 GAME_STATE_CHAMPIONSHIP = "CHAMPIONSHIP"
 GAME_STATE_PRACTICE = "PRACTICE"
 GAME_STATE_SETTINGS = "SETTINGS"
 GAME_STATE_RACE = "RACE"
 game_state = GAME_STATE_MENU
+
+# tlačítka
+buttons = [
+    {"text": "CHAMPIONSHIP", "rect": pygame.Rect(300, 200, 300, 60), "action": GAME_STATE_CHAMPIONSHIP},
+    {"text": "PRACTICE", "rect": pygame.Rect(300, 280, 300, 60), "action": GAME_STATE_PRACTICE},
+    {"text": "SETTINGS", "rect": pygame.Rect(300, 360, 300, 60), "action": GAME_STATE_SETTINGS}
+]
 
 current_weather = "SUN"
 weather_timer = 0.0
@@ -203,87 +203,88 @@ while True:
                 driver.pit_error = random.random() < 0.15 # chyba při vjezdu do boxu
         
         # menu myší
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            
-            mouse_pos = pygame.mouse.get_pos()
-            
-            for btn in buttons:
-                if btn["rect"].collidepoint(mouse_pos):
-                    game_state = btn["action"]
-                # pitstopy
-                can_pit = (
-                    not driver.in_pit and driver.current_lap - driver.last_pit_lap >= driver.pit_cooldown_laps
-                )
+            if event.type == pygame.MOUSEBUTTONDOWN:
                 
-                if can_pit:
-                    driver.in_pit = True
-                    driver.pit_timer = 0.0
-                    print(f"{driver.name} entering pit lane")
-                else:
-                    print(f"{driver.name} cannot pit yet")
-            
-        if event.key == pygame.K_UP: # výběr jezdce nahoru
-            idx = drivers.index(selected_driver)
-            idx -= 1
-            if idx < 0:
-                idx = len(drivers) - 1
-            selected_driver = drivers[idx]
+                mouse_pos = pygame.mouse.get_pos()
                 
-        if event.key == pygame.K_DOWN: # výběr jezdce dolu
-            idx = drivers.index(selected_driver)
-            idx += 1
-            if idx >= len(drivers):
-                idx = 0
-            selected_driver = drivers[idx]
+                for btn in buttons:
+                    if btn["rect"].collidepoint(mouse_pos):
+                        game_state = btn["action"]
+                    # pitstopy
+                    can_pit = (
+                        not driver.in_pit and driver.current_lap - driver.last_pit_lap >= driver.pit_cooldown_laps
+                    )
+                    
+                    if can_pit:
+                        driver.in_pit = True
+                        driver.pit_timer = 0.0
+                        print(f"{driver.name} entering pit lane")
+                    else:
+                        print(f"{driver.name} cannot pit yet")
+                
+            if event.key == pygame.K_UP: # výběr jezdce nahoru
+                idx = drivers.index(selected_driver)
+                idx -= 1
+                if idx < 0:
+                    idx = len(drivers) - 1
+                selected_driver = drivers[idx]
+                    
+            if event.key == pygame.K_DOWN: # výběr jezdce dolu
+                idx = drivers.index(selected_driver)
+                idx += 1
+                if idx >= len(drivers):
+                    idx = 0
+                selected_driver = drivers[idx]
         # výběr pneu    
-        if event.key == pygame.K_1:
-            selected_driver.next_tire = "SOFT"
-            print(f"{selected_driver.name} selected SOFT")
+            if event.key == pygame.K_1:
+                selected_driver.next_tire = "SOFT"
+                print(f"{selected_driver.name} selected SOFT")
+                
+            if event.key == pygame.K_2:
+                selected_driver.next_tire = "MEDIUM"
+                print(f"{selected_driver.name} selected MEDIUM")
+                
+            if event.key == pygame.K_3:
+                selected_driver.next_tire = "HARD"
+                print(f"{selected_driver.name} selected HARD")
             
-        if event.key == pygame.K_2:
-            selected_driver.next_tire = "MEDIUM"
-            print(f"{selected_driver.name} selected MEDIUM")
+            if event.key == pygame.K_4:
+                selected_driver.next_tire = "INTER"
+                print(f"{selected_driver.name} selected INTER")
             
-        if event.key == pygame.K_3:
-            selected_driver.next_tire = "HARD"
-            print(f"{selected_driver.name} selected HARD")
-        
-        if event.key == pygame.K_4:
-            selected_driver.next_tire = "INTER"
-            print(f"{selected_driver.name} selected INTER")
-        
-        if event.key == pygame.K_5:
-            selected_driver.next_tire = "WET"
-            print(f"{selected_driver.name} selected WET")
-        # další závod
-        if event.key == pygame.K_n:
-            reset_race(drivers)
-            print("Next race started!")
+            if event.key == pygame.K_5:
+                selected_driver.next_tire = "WET"
+                print(f"{selected_driver.name} selected WET")
+            # další závod
+            if event.key == pygame.K_n:
+                reset_race(drivers)
+                print("Next race started!")
             
         # menu
         if game_state == GAME_STATE_MENU:
+            if event.type == pygame.KEYDOWN:
             
-            if event.key == pygame.K_UP:
-                selected_menu_index -= 1
-                if selected_menu_index < 0:
-                    selected_menu_index = len(menu_options) -1
-                    
-            if event.key == pygame.K_DOWN:
-                selected_menu_index += 1
-                if selected_menu_index >= len(menu_options):
-                    selected_menu_index = 0
-            
-            if event.key == pygame.K_RETURN:
-                chosen = menu_options[selected_menu_index]
+                if event.key == pygame.K_UP:
+                    selected_menu_index -= 1
+                    if selected_menu_index < 0:
+                        selected_menu_index = len(menu_options) -1
+                        
+                if event.key == pygame.K_DOWN:
+                    selected_menu_index += 1
+                    if selected_menu_index >= len(menu_options):
+                        selected_menu_index = 0
                 
-                if chosen == "Championship":
-                    game_state = GAME_STATE_RACE
+                if event.key == pygame.K_RETURN:
+                    chosen = menu_options[selected_menu_index]
                     
-                if chosen == "Free Practice":
-                    game_state = GAME_STATE_PRACTICE
-                    
-                if chosen == "Settings":
-                    game_state = GAME_STATE_SETTING
+                    if chosen == "Championship":
+                        game_state = GAME_STATE_RACE
+                        
+                    if chosen == "Free Practice":
+                        game_state = GAME_STATE_PRACTICE
+                        
+                    if chosen == "Settings":
+                        game_state = GAME_STATE_SETTING
                     
 # update
     if game_state == "FINISHED":
