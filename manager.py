@@ -24,7 +24,7 @@ GAME_STATE_CHAMPIONSHIP = "CHAMPIONSHIP"
 GAME_STATE_PRACTICE = "PRACTICE"
 GAME_STATE_SETTINGS = "SETTINGS"
 GAME_STATE_RACE = "RACE"
-game_state = GAME_STATE_RACE
+game_state = GAME_STATE_MENU
 
 current_weather = "SUN"
 weather_timer = 0.0
@@ -156,6 +156,10 @@ def reset_race(drivers):
         d.tire_wear = 0
         d.in_pit = False
         d.finished = False
+        
+# menu
+menu_options = ["Championship", "Free Practice", "Settings"]
+selected_menu_index = 0
 
 # vykreslovaci smycka
 while True:
@@ -223,6 +227,31 @@ while True:
             if event.key == pygame.K_n:
                 reset_race(drivers)
                 print("Next race started!")
+                
+            # menu
+            if game_state == GAME_STATE_MENU:
+                
+                if event.key == pygame.K_UP:
+                    selected_menu_index -= 1
+                    if selected_menu_index < 0:
+                        selected_menu_index = len(menu_options) -1
+                        
+                if event.key == pygame.K_DOWN:
+                    selected_menu_index += 1
+                    if selected_menu_index >= len(menu_options):
+                        selected_menu_index = 0
+                
+                if event.key == pygame.K_RETURN:
+                    chosen = menu_options[selected_menu_index]
+                    
+                    if chosen == "Championship":
+                        game_state = GAME_STATE_RACE
+                        
+                    if chosen == "Free Practice":
+                        game_state = GAME_STATE_PRACTICE
+                        
+                    if chosen == "Settings":
+                        game_state = GAME_STATE_SETTINGS
             
 # update
     if game_state == "FINISHED":
@@ -415,6 +444,27 @@ while True:
     # draw
     screen.fill((20,20,20,))
     pygame.draw.line(screen, (80, 80, 80), (680,0), (680,600), 2)
+    
+        # menu
+    if game_state == GAME_STATE_MENU:
+        
+        screen.fill((15,15,15))
+        
+        title = font.render("F1 MANAGER", True, (255,255,255))
+        screen.blit(title, (350,100))
+        
+        y = 200
+        for i, option in enumerate(menu_options):
+            
+            color = (0,255,0) if i == selected_menu_index else (200,200,200)
+            
+            text = font.render(option, True, color)
+            screen.blit(text, (380, y))
+            
+            y += 50
+            
+        pygame.display.flip()
+        continue 
     
         #safety car
     if safety_car_active:
