@@ -33,8 +33,6 @@ buttons = [
     {"text": "SETTINGS", "rect": pygame.Rect(300, 360, 300, 60), "action": GAME_STATE_SETTINGS}
 ]
 
-current_weather = "SUN"
-weather_timer = 0.0
 WEATHER_CHANGE_TIME = 12.0
 
 race_time = 0.0
@@ -80,19 +78,9 @@ class Driver: # jezdec
         self.points = 0
     
 PIT_TIME = 5.0
-selected_driver = drivers[0]
 
-#safety car/ VSC/ red flag
-safety_car_active = False
-safety_car_timer = 0.0
 SAFETY_CAR_DURATION = 8.0
-
-vsc_active = False
-vsc_timer = 0.0
 VSC_DURATION = 6.0
-
-red_flag_active = False
-red_flag_timer = 0.0
 RED_FLAG_DURATION = 5.0
 
 #Ai boxy
@@ -192,7 +180,7 @@ class MenuScreen(Screen):
     # tlačítka
     def __init__(self):
         self.buttons = [
-            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(300, 200, 300, 60), "action": GAME_STATE_CHAMPIONSHIP},
+            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(300, 200, 300, 60), "action": GAME_STATE_RACE},
             {"text": "PRACTICE", "rect": pygame.Rect(300, 280, 300, 60), "action": GAME_STATE_PRACTICE},
             {"text": "SETTINGS", "rect": pygame.Rect(300, 360, 300, 60), "action": GAME_STATE_SETTINGS}
         ]
@@ -209,7 +197,7 @@ class MenuScreen(Screen):
                         change_screen(btn["action"])
     # draw                    
     def draw(self, screen):
-        screen.fill((15,15,15))
+        screen.fill((50,0,0))
         
         title = font.render("F1 MANAGER", True, (255,255,255))
         screen.blit(title, (350,100))
@@ -222,15 +210,31 @@ class MenuScreen(Screen):
 
 # screen classy
 class RaceScreen(Screen):
-    def _init_(self):
-        self.race_time = 0.0
+    def __init__(self):
+        self.race_time = 0.0 # čas
         
-        # kopie jezdců
+        # počasí
+        self.current_weather = "SUN"
+        self.weather_timer = 0.0
+        
+        #safety car/ VSC/ red flag
+        self.safety_car_active = False
+        self.safety_car_timer = 0.0
+        
+        self.vsc_active = False
+        self.vsc_timer = 0.0
+        
+        self.red_flag_active = False
+        self.red_flag_timer = 0.0
+        
+        # jezdci
         self.drivers = [
             Driver("Driver A", 3.0, "SOFT"),
             Driver("Driver B", 3.1, "MEDIUM"),
             Driver("Driver C", 3.2, "HARD"),
         ]
+        self.selected_driver = self.drivers[0]
+        
     def update(self, delta_time):
         
         self.race_time += delta_time
@@ -247,10 +251,22 @@ class RaceScreen(Screen):
                 driver.current_lap += 1
                 driver.total_time += lap_time
                 
-                print(driver.name, "completed lap", driver.current_lap)
-                
                 if driver.current_lap >= RACE_LAPS:
                     driver.finished = True
+                    
+        self.weather_timer += delta_time
+        
+        if self.weather_timer > 12:
+            self.weather_timer = 0
+            
+            roll = random.random()
+            
+            if roll < 0.6:
+                self.current_weather = "SUN"
+            elif roll < 0.85:
+                self.current_weather = "CLOUD"
+            else:
+                self.current_weather = "RAIN"
                     
     def handle_events(self, events):
         for event in events:
@@ -264,16 +280,9 @@ class RaceScreen(Screen):
         text = font.render(f"Race time: {self.race_time:.1f}", True, (255,255,255))
         screen.blit(text, (20,20))
         
-        y = 80
+        weather = font.render(f"Weather: {self.current_weather}", True, (255,255,0))
+        screen.blit(weather, (20,50))
         
-        # seřadíme podle času
-        results = sorted(self.drivers, key=lambda d: d.total_time)
-        
-        for i, driver in enumerate(results):
-            text = font.render(f"{i+1}, {driver.name} Lap:{driver.current_lap}", True, (255,255,255))
-            screen.blit(text, (20, y))
-            y += 40
-            
 class PracticeScreen(Screen):
     def draw(self, screen):
         screen.fill((0,0,100))
@@ -319,4 +328,4 @@ while True:
     current_screen.update(delta_time)
     current_screen.draw(screen)
     
-pygame.display.flip()
+    pygame.display.flip()
