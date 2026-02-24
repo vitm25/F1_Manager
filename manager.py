@@ -14,7 +14,7 @@ race_finished = False
 points_awarded = False
 
 #vykreslení okna
-screen = pygame.display.set_mode(rozliseni_okna)
+screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 pygame.display.set_caption("F1 manažer")
 
 clock = pygame.time.Clock()
@@ -180,9 +180,9 @@ class MenuScreen(Screen):
     # tlačítka
     def __init__(self):
         self.buttons = [
-            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(300, 200, 300, 60), "action": GAME_STATE_RACE},
-            {"text": "PRACTICE", "rect": pygame.Rect(300, 280, 300, 60), "action": GAME_STATE_PRACTICE},
-            {"text": "SETTINGS", "rect": pygame.Rect(300, 360, 300, 60), "action": GAME_STATE_SETTINGS}
+            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(800, 360, 300, 60), "action": GAME_STATE_RACE},
+            {"text": "PRACTICE", "rect": pygame.Rect(800, 440, 300, 60), "action": GAME_STATE_PRACTICE},
+            {"text": "SETTINGS", "rect": pygame.Rect(800, 520, 300, 60), "action": GAME_STATE_SETTINGS}
         ]
     # eventy
     def handle_events(self, events):
@@ -200,7 +200,7 @@ class MenuScreen(Screen):
         screen.fill((50,0,0))
         
         title = font.render("F1 MANAGER", True, (255,255,255))
-        screen.blit(title, (350,100))
+        screen.blit(title, (870,300))
         
         for btn in self.buttons:
             pygame.draw.rect(screen, (255,255,255), btn["rect"], 2)
@@ -208,7 +208,8 @@ class MenuScreen(Screen):
             text = font.render(btn["text"], True, (255,255,255))
             screen.blit(text, (btn["rect"].x+20, btn["rect"].y+15))
 
-# screen classy
+                                    # screen classy
+# závod/ championship
 class RaceScreen(Screen):
     def __init__(self):
         self.race_time = 0.0 # čas
@@ -235,6 +236,7 @@ class RaceScreen(Screen):
         ]
         self.selected_driver = self.drivers[0]
         
+    # updaty
     def update(self, delta_time):
         
         self.race_time += delta_time
@@ -267,29 +269,59 @@ class RaceScreen(Screen):
                 self.current_weather = "CLOUD"
             else:
                 self.current_weather = "RAIN"
-                    
+    
+    # eventy                
     def handle_events(self, events):
         for event in events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     change_screen(GAME_STATE_MENU)
-                    
+    
+    # kreslení
     def draw(self, screen):
         screen.fill((0,100,0))
         
-        text = font.render(f"Race time: {self.race_time:.1f}", True, (255,255,255))
-        screen.blit(text, (20,20))
+        # race time
+        time_text = font.render(f"Race time: {self.race_time:.1f}", True, (255,255,255))
+        screen.blit(time_text, (20,20))
         
-        weather = font.render(f"Weather: {self.current_weather}", True, (255,255,0))
-        screen.blit(weather, (20,50))
+        # počasí
+        weather_text = font.render(f"Weather: {self.current_weather}", True, (255,255,0))
+        screen.blit(weather_text, (20,50))
         
+        # jezdci
+        y = 100
+        
+            # seřazení podle času
+        results = sorted(self.drivers, key=lambda d: d.total_time)
+                         
+        for i, driver in enumerate(results):
+        
+            text = font.render(f"p{i+1} {driver.name} | Lap {driver.current_lap}", True, (255, 55, 255))
+            
+            screen.blit(text, (20,y))
+            y += 35
+
+# trénink
 class PracticeScreen(Screen):
     def draw(self, screen):
         screen.fill((0,0,100))
         
+    def handle_events(self, events):
+        for event in events:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    change_screen(GAME_STATE_MENU)
+# nastavení        
 class SettingsScreen(Screen):
     def draw(self, screen):
         screen.fill((100,0,0))
+    
+    def handle_events(self, events):
+        for event in events:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    change_screen(GAME_STATE_MENU)
         
 #změna okna
 current_screen = None
