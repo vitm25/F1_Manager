@@ -14,7 +14,7 @@ race_finished = False
 points_awarded = False
 
 #vykreslení okna
-screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+screen = pygame.display.set_mode(rozliseni_okna)
 pygame.display.set_caption("F1 manažer")
 
 clock = pygame.time.Clock()
@@ -273,9 +273,18 @@ class RaceScreen(Screen):
     # eventy                
     def handle_events(self, events):
         for event in events:
+            
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     change_screen(GAME_STATE_MENU)
+            
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                
+                for rect, driver in self.driver_rects:
+                    if rect.collidepoint(mouse_pos):
+                        self.selected_driver = driver
+                        print("Selected:", driver.name)
     
     # kreslení
     def draw(self, screen):
@@ -289,24 +298,37 @@ class RaceScreen(Screen):
         weather_text = font.render(f"Weather: {self.current_weather}", True, (255,255,0))
         screen.blit(weather_text, (20,50))
         
-        # jezdci
+        # jezdci / leaderboard
         y = 100
+        self.driver_rects = [] # seznam klikacích oblastí
         
             # seřazení podle času
         results = sorted(self.drivers, key=lambda d: d.total_time)
                          
         for i, driver in enumerate(results):
+            
+            rect = pygame.Rect(20, y, 400, 35)
+            self.driver_rects.append((rect, driver))
+            
+            # zvýraznění vybraného jezdce
+            if driver == self.selected_driver:
+                pygame.draw.rect(screen, (80,80,80), rect)
         
-            text = font.render(f"p{i+1} {driver.name} | Lap {driver.current_lap}", True, (255, 55, 255))
+            text = font.render(f"p{i+1} {driver.name} | Lap {driver.current_lap}", True, (255, 255, 255))
             
             screen.blit(text, (20,y))
-            y += 35
+            y += 45
 
 # trénink
 class PracticeScreen(Screen):
     def draw(self, screen):
         screen.fill((0,0,100))
         
+    # updaty
+    def update(self, delta_time):
+        pass
+    
+    # eventy    
     def handle_events(self, events):
         for event in events:
             if event.type == pygame.KEYDOWN:
@@ -316,7 +338,12 @@ class PracticeScreen(Screen):
 class SettingsScreen(Screen):
     def draw(self, screen):
         screen.fill((100,0,0))
-    
+        
+    # updaty
+    def update(self, delta_time):
+        pass
+
+    # eventy
     def handle_events(self, events):
         for event in events:
             if event.type == pygame.KEYDOWN:
