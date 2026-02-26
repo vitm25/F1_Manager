@@ -215,6 +215,22 @@ class MenuScreen(Screen):
             
             text = font.render(btn["text"], True, (255,255,255))
             screen.blit(text, (btn["rect"].x+20, btn["rect"].y+15))
+            
+def ai_choose_pace(driver, race_progress):
+    
+    # zničené gumy
+    if driver.tire_wear > 0.75:
+        return "SAVE"
+    
+    # last lap
+    if race_progress > 0.75:
+        return "PUSH"
+    
+    # déšť
+    if current_weather == "RAIN":
+        return "SAVE"
+    
+    return "NEUTRAL"
 
                                     # screen classy
 # závod/ championship
@@ -312,6 +328,16 @@ class RaceScreen(Screen):
                     self.selected_driver.in_pit = True
                     self.selected_driver.pit_timer = 0
                     print(self.selected_driver.name, "BOX BOX")
+                    
+                # pace buttons
+                if self.push_button.collidepoint(mouse_pos):
+                    self.selected_driver.pace_mode = "PUSH"
+                    
+                if self.neutral_button.collidepoint(mouse_pos):
+                    self.selected_driver.pace_mode = "NEUTRAL"
+                    
+                if self.save_button.collidepoint(mouse_pos):
+                    self.selected_driver.pace_mode = "SAVE"
     # kreslení
     def draw(self, screen):
         screen.fill((0,100,0))
@@ -370,6 +396,9 @@ class RaceScreen(Screen):
         pygame.draw.rect(screen, (200,50,50), self.pit_button)
         pit_text = font.render("PIT STOP", True, (255,255,255))
         screen.blit(pit_text, (panel_x + 45, 190))
+        
+        pace_text = font.render(f"Pace: {driver.pace_mode}", True, (255,255,0))
+        screen.blit(pace_text, (panel_x + 20,320))
         
         # push, neutral, save
         self.push_button = pygame.Rect(panel_x + 20, 260, 80, 40)
