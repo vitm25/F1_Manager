@@ -9,7 +9,7 @@ barvy_pozadi = (0, 0, 0,)
 FPS = 60
 RACE_ARE_WIDTH = 650
 
-RACE_LAPS = 2
+RACE_LAPS = 20
 race_finished = False
 points_awarded = False
 
@@ -54,6 +54,12 @@ WEATHER_TYPES = {
     "RAIN": {"lap_modifier": 0.8, "wear_modifier": 1.6},
 }
 
+PACE = {
+    "PUSH": {"pace": -0.4, "wear": 1.6},
+    "NEUTRAL": {"pace": 0.0, "wear": 1.0},
+    "SAVE": {"pace": 0.5, "wear": 0.6},
+}
+
 class Driver: # jezdec
     def __init__(self, name, base_lap_time, tire):
         self.name = name
@@ -76,6 +82,8 @@ class Driver: # jezdec
         self.pit_error = False
         
         self.points = 0
+        
+        self.pace_mode = "NEUTRAL"
     
 PIT_TIME = 5.0
 
@@ -246,7 +254,11 @@ class RaceScreen(Screen):
                 continue
             
             driver.lap_timer += delta_time
-            lap_time = driver.base_lap_time
+            pace = PACE[driver.pace_mode]
+            lap_time = driver.base_lap_time + pace["pace"]
+            
+            driver.tire_wear += delta_time * 0.02 * pace["wear"]
+            driver.tire_wear = min(driver.tire_wear, 1.0)
             
             if driver.lap_timer >= lap_time:
                 driver.lap_timer = 0
@@ -255,6 +267,14 @@ class RaceScreen(Screen):
                 
                 if driver.current_lap >= RACE_LAPS:
                     driver.finished = True
+                    
+            if driver.in_pit:
+                driver.pit_timer += delta_time
+                
+                if driver.pit_timer >= PIT_TIME:
+                    driver.in_pit = False
+                    driver.tire_wear = 0.0
+                    driver.tire = random.choice(["SOFT","MEDIUM","HARD"])
                     
         self.weather_timer += delta_time
         
@@ -281,11 +301,17 @@ class RaceScreen(Screen):
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = pygame.mouse.get_pos()
                 
+                # výběr jezdce
                 for rect, driver in self.driver_rects:
                     if rect.collidepoint(mouse_pos):
                         self.selected_driver = driver
                         print("Selected:", driver.name)
-    
+                        
+                # pit button
+                if self.pit_button.collidepoint(mouse_pos):
+                    self.selected_driver.in_pit = True
+                    self.selected_driver.pit_timer = 0
+                    print(self.selected_driver.name, "BOX BOX")
     # kreslení
     def draw(self, screen):
         screen.fill((0,100,0))
@@ -318,6 +344,45 @@ class RaceScreen(Screen):
             
             screen.blit(text, (20,y))
             y += 45
+            
+                                    # panel ovladani
+        # box box
+        panel_x = 700
+        panel_rect = pygame.Rect(panel_x, 0, 300, 600)
+        
+        pygame.draw.rect(screen, (30,30,30), panel_rect)
+        pygame.draw.line(screen, (80,80,80), (panel_x, 0), (panel_x, 600), 2)
+        
+        driver = self.selected_driver
+        
+        name_text = font.render(driver.name, True, (255,255,255))
+        screen.blit(name_text, (panel_x + 20, 40))
+        
+        tire_text = font.render(f"Tire: {driver.tire}", True, (255,255,255))
+        screen.blit(tire_text, (panel_x + 20, 80))
+        
+        wear_percent = int(driver.tire_wear * 100)
+        wear_text = font.render(f"Wear: {wear_percent}%", True, (255,255,255))
+        screen.blit(wear_text, (panel_x + 20, 120))
+        
+        self.pit_button = pygame.Rect(panel_x +20, 180,200,50)
+        
+        pygame.draw.rect(screen, (200,50,50), self.pit_button)
+        pit_text = font.render("PIT STOP", True, (255,255,255))
+        screen.blit(pit_text, (panel_x + 45, 190))
+        
+        # push, neutral, save
+        self.push_button = pygame.Rect(panel_x + 20, 260, 80, 40)
+        self.neutral_button = pygame.Rect(panel_x + 110, 260, 80, 40)
+        self.save_button = pygame.Rect(panel_x + 200, 260, 80, 40)
+        
+        pygame.draw.rect(screen, (200,60,60), self.push_button)
+        pygame.draw.rect(screen, (120,120,120), self.neutral_button)
+        pygame.draw.rect(screen, (60,120,200), self.save_button)
+        
+        screen.blit(font.render("PUSH", True, (255,255,255)), (panel_x+25, 265))
+        screen.blit(font.render("N", True, (255,255,255)), (panel_x+135, 265))
+        screen.blit(font.render("SAVE", True, (255,255,255)), (panel_x+205, 265))
 
 # trénink
 class PracticeScreen(Screen):
