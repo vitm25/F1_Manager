@@ -84,6 +84,7 @@ class Driver: # jezdec
         self.points = 0
         
         self.pace_mode = "NEUTRAL"
+        self.ai_decision_timer = 0
     
 PIT_TIME = 5.0
 
@@ -263,8 +264,14 @@ class RaceScreen(Screen):
     # updaty
     def update(self, delta_time):
         
+        race_progress = max(d.current_lap for d in self.drivers) / RACE_LAPS
+        driver.ai_decision_timer += delta_time
         self.race_time += delta_time
         for driver in self.drivers:
+            
+            if driver != self.selected_driver and driver.ai_decision_timer > 2:
+                driver.pace_mode = ai_choose_pace(driver, race_progress)
+                driver.ai_decision_timer = 0
             
             if getattr(driver, "finished", False):
                 continue
