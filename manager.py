@@ -84,7 +84,7 @@ class Driver: # jezdec
         self.points = 0
         
         self.pace_mode = "NEUTRAL"
-        self.ai_decision_timer = 0
+        self.ai_decision_timer = 0.0
     
 PIT_TIME = 5.0
 
@@ -93,7 +93,7 @@ VSC_DURATION = 6.0
 RED_FLAG_DURATION = 5.0
 
 #Ai boxy
-def ai_should_pit(driver):
+def ai_should_pit(driver, current_weather, race):
     if driver.in_pit:
         return False
     
@@ -103,7 +103,7 @@ def ai_should_pit(driver):
     if driver.tire_wear > 0.75:
         return True 
     
-    if safety_car_active or vsc_active:
+    if race.safety_car_active or race.vsc_active:
         if driver.tire_wear > 0.3:
             return False
     
@@ -116,7 +116,7 @@ def ai_should_pit(driver):
     return False
 
 #Ai si vybíra kola
-def ai_choose_tire(driver):
+def ai_choose_tire(driver, current_weather):
     
     if current_weather == "RAIN":
         if random.random() < 0.5:
@@ -217,21 +217,40 @@ class MenuScreen(Screen):
             text = font.render(btn["text"], True, (255,255,255))
             screen.blit(text, (btn["rect"].x+20, btn["rect"].y+15))
             
-def ai_choose_pace(driver, race_progress):
+def ai_choose_pace(driver, race_progress, current_weather):
     
     # zničené gumy
-    if driver.tire_wear > 0.75:
+    if driver.tire_wear > 0.8:
         return "SAVE"
-    
-    # last lap
-    if race_progress > 0.75:
-        return "PUSH"
     
     # déšť
     if current_weather == "RAIN":
         return "SAVE"
     
-    return "NEUTRAL"
+    # start závodu
+    if race_progress < 0.3:
+        return "NEUTRAL"
+    
+    # střed závodu
+    if race_progress < 0.75:
+        if driver.tire_wear < 0.4:
+            return "PUSH"
+        return "NEUTRAL"
+    
+    # konec závodu
+    return "PUSH"
+
+def calculate_gaps(drivers):
+    results = sorted(drivers, key=lambda d: d.total_time)
+    
+    leader_time = results[0].total_time
+    
+    gaps = []
+    for d in results:
+        gap = d.total_time - leader_time
+        gaps.append((d, gap))
+        
+    return gaps
 
                                     # screen classy
 # závod/ championship
@@ -265,13 +284,22 @@ class RaceScreen(Screen):
     def update(self, delta_time):
         
         race_progress = max(d.current_lap for d in self.drivers) / RACE_LAPS
-        driver.ai_decision_timer += delta_time
+        for driver in self.drivers:
+            driver.ai_decision_timer += delta_time
         self.race_time += delta_time
         for driver in self.drivers:
             
             if driver != self.selected_driver and driver.ai_decision_timer > 2:
-                driver.pace_mode = ai_choose_pace(driver, race_progress)
+                driver.pace_mode = ai_choose_pace(driver, race_progress, self.current_weather)
                 driver.ai_decision_timer = 0
+                
+            if driver != self.selected_driver:
+                if ai_should_pit(driver, self):
+                    driver.in_pit = True
+                    driver.pit_timer = 0
+                    driver.last_pit_lap = driver.current_lap
+                    driver.tire = ai_choose_tire(driver, self.current_weather)
+                    print(driver.name, "AI PIT STOP")
             
             if getattr(driver, "finished", False):
                 continue
@@ -362,9 +390,9 @@ class RaceScreen(Screen):
         self.driver_rects = [] # seznam klikacích oblastí
         
             # seřazení podle času
-        results = sorted(self.drivers, key=lambda d: d.total_time)
+        results = calculate_gaps(self.drivers)
                          
-        for i, driver in enumerate(results):
+        for i, (driver, gap) in enumerate(results):
             
             rect = pygame.Rect(20, y, 400, 35)
             self.driver_rects.append((rect, driver))
@@ -372,8 +400,15 @@ class RaceScreen(Screen):
             # zvýraznění vybraného jezdce
             if driver == self.selected_driver:
                 pygame.draw.rect(screen, (80,80,80), rect)
+                
+            if i == 0:
+                gap_text = "LEADER"
+            else:
+                gap_text = f"+{gap:.1f}s"
+                
+            color = (255,255,0) if i == 0 else (255,255,255)
         
-            text = font.render(f"p{i+1} {driver.name} | Lap {driver.current_lap}", True, (255, 255, 255))
+            text = font.render(f"p{i+1} {driver.name} | {gap_text} | Lap {driver.current_lap}", True, (color))
             
             screen.blit(text, (20,y))
             y += 45
