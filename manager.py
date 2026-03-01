@@ -85,6 +85,32 @@ class Driver: # jezdec
         
         self.pace_mode = "NEUTRAL"
         self.ai_decision_timer = 0.0
+        
+        self.base_speed = random.uniform(0.95, 1.05)
+        self.overtake_skill = random.uniform(0.8, 1.2)
+        
+        self.distance = 0.0
+        
+# výpočet akt. rychlosti
+def get_speed(driver, race):
+    
+    speed = driver.base_speed
+    
+    # opotřebení zpomaluje
+    speed *= (1 - driver.tire_wear * 0.4)
+    
+    # počasí
+    if race.current_weather == "RAIN":
+        if driver.tire == "SOFT":
+            speed *= 0.85
+        elif driver.tire == "INTER":
+            speed *= 1.05
+            
+    # pit lane
+    if driver.in_pit:
+        speed *= 0.4
+    
+    return speed
     
 PIT_TIME = 5.0
 
@@ -93,7 +119,7 @@ VSC_DURATION = 6.0
 RED_FLAG_DURATION = 5.0
 
 #Ai boxy
-def ai_should_pit(driver, current_weather, race):
+def ai_should_pit(driver, race):
     if driver.in_pit:
         return False
     
@@ -107,10 +133,10 @@ def ai_should_pit(driver, current_weather, race):
         if driver.tire_wear > 0.3:
             return False
     
-    if current_weather == "RAIN" and driver.tire not in ["INTER", "WET"]:
+    if race.current_weather == "RAIN" and driver.tire not in ["INTER", "WET"]:
         return True
     
-    if current_weather == "SUN" and driver.tire in ["INTER", "WET"]:
+    if race.current_weather == "SUN" and driver.tire in ["INTER", "WET"]:
         return True 
         
     return False
@@ -287,6 +313,7 @@ class RaceScreen(Screen):
         for driver in self.drivers:
             driver.ai_decision_timer += delta_time
         self.race_time += delta_time
+        
         for driver in self.drivers:
             
             if driver != self.selected_driver and driver.ai_decision_timer > 2:
@@ -304,6 +331,9 @@ class RaceScreen(Screen):
             if getattr(driver, "finished", False):
                 continue
             
+            speed = get_speed(driver, self)
+            driver.distance += speed * delta_time * 100
+            
             driver.lap_timer += delta_time
             pace = PACE[driver.pace_mode]
             lap_time = driver.base_lap_time + pace["pace"]
@@ -315,6 +345,7 @@ class RaceScreen(Screen):
                 driver.lap_timer = 0
                 driver.current_lap += 1
                 driver.total_time += lap_time
+                driver.distance = 0
                 
                 if driver.current_lap >= RACE_LAPS:
                     driver.finished = True
@@ -340,6 +371,33 @@ class RaceScreen(Screen):
                 self.current_weather = "CLOUD"
             else:
                 self.current_weather = "RAIN"
+                
+    def handle_battles(self):
+        
+        # seřadíme podle vzdálenosti
+        self.drivers.sort(key=lambda d: d.distance, reverse=True)
+        
+        for i in range(len(self.drivers) - 1):
+            
+            front = self.drivers[i]
+            behind = self.drivers[i + 1]
+            
+            gap = front.distance - behind.distance
+            
+            # pokud jsou blízko > boj
+            if gap < 5:
+                
+                front_speed = get_speed(front, self)
+                behind_speed = get_speed(behind, self)
+                
+                attack_chance = 0.02 * behind.overtake_skill
+                
+                if behind_speed > front_speed and random.random() < attack_chance:
+                    
+                    # předjetí
+                    self.drivers[i], self.drivers[i+1] = behind, front
+                    
+                    print(front.name, front.distance, "|", behind.name, behind.distance)
     
     # eventy                
     def handle_events(self, events):
