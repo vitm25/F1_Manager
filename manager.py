@@ -90,6 +90,7 @@ class Driver: # jezdec
         self.overtake_skill = random.uniform(0.8, 1.2)
         
         self.distance = 0.0
+        self.drs_active = False
         
 # výpočet akt. rychlosti
 def get_speed(driver, race):
@@ -109,6 +110,10 @@ def get_speed(driver, race):
     # pit lane
     if driver.in_pit:
         speed *= 0.4
+        
+    # DRS boost
+    if driver.drs_active:
+        speed *= 1.15
     
     return speed
     
@@ -302,12 +307,43 @@ class RaceScreen(Screen):
         self.drivers = [
             Driver("Driver A", 3.0, "SOFT"),
             Driver("Driver B", 3.1, "MEDIUM"),
-            Driver("Driver C", 3.2, "HARD"),
+            Driver("Driver C", 3.0, "SOFT"),
         ]
         self.selected_driver = self.drivers[0]
         
+        self.time_scale = 1
+        self.time_modes = [1,2,4,20]
+        self.time_index = 0
+        
+    def update_drs(self):
+    
+        #seřazení podle pozice na trari
+        ordered = sorted(self.drivers, key=lambda d: (d.current_lap, d.distance), reverse=True)
+        
+        for i, driver in enumerate(ordered):
+            
+            driver.drs_actice = False
+            
+            # leader nemá drs
+            if i == 0:
+                continue
+            
+            front = ordered[i - 1]
+    
+            gap = front.distance - driver.distance
+            
+            # DRS podmínky
+            if (
+                gap < 25 # vzdálenost
+                and self.current_weather != "RAIN"
+                and self.race_time > 5 # start závodu
+            ):
+                driver.drs_active = True 
+        
     # updaty
     def update(self, delta_time):
+        
+        delta_time *= self.time_scale 
         
         race_progress = max(d.current_lap for d in self.drivers) / RACE_LAPS
         for driver in self.drivers:
@@ -375,7 +411,7 @@ class RaceScreen(Screen):
     def handle_battles(self):
         
         # seřadíme podle vzdálenosti
-        self.drivers.sort(key=lambda d: d.distance, reverse=True)
+        self.drivers.sort(key=lambda d: (d.current_lap, d.distance), reverse=True)
         
         for i in range(len(self.drivers) - 1):
             
@@ -397,8 +433,11 @@ class RaceScreen(Screen):
                     # předjetí
                     self.drivers[i], self.drivers[i+1] = behind, front
                     
-                    print(front.name, front.distance, "|", behind.name, behind.distance)
-    
+                    print("front.name, front.distance", "|", "behind.name, behind.distance")
+                    
+        self.handle_battles()
+        self.update_drs()
+        
     # eventy                
     def handle_events(self, events):
         for event in events:
@@ -406,6 +445,14 @@ class RaceScreen(Screen):
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     change_screen(GAME_STATE_MENU)
+                    
+                if event.key == pygame.K_TAB:
+                    self.time_index += 1
+                    if self.time_index >= len(self.time_modes):
+                        self.time_index = 0
+                        
+                    self.time_scale = self.time_modes[self.time_index]
+                    print("Time speed:", self.time_scale, "x")
             
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = pygame.mouse.get_pos()
@@ -439,6 +486,10 @@ class RaceScreen(Screen):
         time_text = font.render(f"Race time: {self.race_time:.1f}", True, (255,255,255))
         screen.blit(time_text, (20,20))
         
+        # čas
+        speed_text = font.render(f"Speed: {self.time_scale}x", True, (255,255,255))
+        screen.blit(speed_text, (20,80))
+        
         # počasí
         weather_text = font.render(f"Weather: {self.current_weather}", True, (255,255,0))
         screen.blit(weather_text, (20,50))
@@ -465,8 +516,9 @@ class RaceScreen(Screen):
                 gap_text = f"+{gap:.1f}s"
                 
             color = (255,255,0) if i == 0 else (255,255,255)
+            drs = "DRS" if driver.drs_active else ""
         
-            text = font.render(f"p{i+1} {driver.name} | {gap_text} | Lap {driver.current_lap}", True, (color))
+            text = font.render(f"p{i+1} {driver.name} {drs} | {gap_text} | Lap {driver.current_lap}", True, (color))
             
             screen.blit(text, (20,y))
             y += 45
