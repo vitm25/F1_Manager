@@ -287,6 +287,8 @@ def calculate_gaps(drivers):
 # závod/ championship
 class RaceScreen(Screen):
     def __init__(self):
+        
+        self.font = pygame.font.SysFont("arial", 22)
         self.race_time = 0.0 # čas
         
         # počasí
@@ -311,9 +313,19 @@ class RaceScreen(Screen):
         ]
         self.selected_driver = self.drivers[0]
         
+        # ovládání času
         self.time_scale = 1
         self.time_modes = [1,2,4,20]
         self.time_index = 0
+        self.paused = False
+        
+        # tlačítka na ovládání rychlosti
+        self.speed_buttons = [
+            {"text":"1x", "rect":pygame.Rect(300,520,60,40), "speed":1},
+            {"text":"2x", "rect":pygame.Rect(370,520,60,40), "speed":2},
+            {"text":"4x", "rect":pygame.Rect(440,520,60,40), "speed":4},
+            {"text":"20x", "rect":pygame.Rect(510,520,60,40), "speed":20},
+        ]
         
     def update_drs(self):
     
@@ -342,6 +354,9 @@ class RaceScreen(Screen):
         
     # updaty
     def update(self, delta_time):
+        
+        if self.paused:
+            return
         
         delta_time *= self.time_scale 
         
@@ -453,6 +468,9 @@ class RaceScreen(Screen):
                         
                     self.time_scale = self.time_modes[self.time_index]
                     print("Time speed:", self.time_scale, "x")
+                    
+                if event.key == pygame.K_SPACE:
+                    self.paused = not self.paused
             
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = pygame.mouse.get_pos()
@@ -478,6 +496,12 @@ class RaceScreen(Screen):
                     
                 if self.save_button.collidepoint(mouse_pos):
                     self.selected_driver.pace_mode = "SAVE"
+                    
+                # tlačítka na čas
+                for button in self.speed_buttons:
+                    
+                    if button["rect"].collidepoint(mouse_pos):
+                        self.time_scale = button["speed"]
     # kreslení
     def draw(self, screen):
         screen.fill((0,100,0))
@@ -495,7 +519,7 @@ class RaceScreen(Screen):
         screen.blit(weather_text, (20,50))
         
         # jezdci / leaderboard
-        y = 100
+        y = 125
         self.driver_rects = [] # seznam klikacích oblastí
         
             # seřazení podle času
@@ -522,6 +546,11 @@ class RaceScreen(Screen):
             
             screen.blit(text, (20,y))
             y += 45
+            
+        # zmražení času
+        if self.paused:
+            pause_text = font.render("PAUSED", True, (255,0,0))
+            screen.blit(pause_text, (450,50))
             
                                     # panel ovladani
         # box box
@@ -564,6 +593,24 @@ class RaceScreen(Screen):
         screen.blit(font.render("PUSH", True, (255,255,255)), (panel_x+25, 265))
         screen.blit(font.render("N", True, (255,255,255)), (panel_x+135, 265))
         screen.blit(font.render("SAVE", True, (255,255,255)), (panel_x+205, 265))
+        
+        # vykreslení tlačítek času
+        for button in self.speed_buttons:
+            
+            pygame.draw.rect(screen,(80,80,80), button["rect"])
+            
+            text_time_button = self.font.render(button["text"], True, (255,255,255))
+            
+            
+            screen.blit(text_time_button, (button["rect"].x+10, button["rect"].y+8))
+            
+            # zvýraznění vybrané rychlosti
+            color = (80,80,80)
+            
+            if button["speed"] == self.time_scale:
+                color = (200,200,0)
+                
+            pygame.draw.rect(screen, color, button["rect"])
 
 # trénink
 class PracticeScreen(Screen):
