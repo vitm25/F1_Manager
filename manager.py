@@ -321,10 +321,10 @@ class RaceScreen(Screen):
         
         # tlačítka na ovládání rychlosti
         self.speed_buttons = [
-            {"text":"1x", "rect":pygame.Rect(300,520,60,40), "speed":1},
-            {"text":"2x", "rect":pygame.Rect(370,520,60,40), "speed":2},
-            {"text":"4x", "rect":pygame.Rect(440,520,60,40), "speed":4},
-            {"text":"20x", "rect":pygame.Rect(510,520,60,40), "speed":20},
+            {"text":"1x", "rect":pygame.Rect(720,500,60,40), "speed":1},
+            {"text":"2x", "rect":pygame.Rect(790,500,60,40), "speed":2},
+            {"text":"4x", "rect":pygame.Rect(860,500,60,40), "speed":4},
+            {"text":"20x", "rect":pygame.Rect(930,500,60,40), "speed":20},
         ]
         
     def update_drs(self):
@@ -334,7 +334,7 @@ class RaceScreen(Screen):
         
         for i, driver in enumerate(ordered):
             
-            driver.drs_actice = False
+            driver.drs_active = False
             
             # leader nemá drs
             if i == 0:
@@ -597,20 +597,20 @@ class RaceScreen(Screen):
         # vykreslení tlačítek času
         for button in self.speed_buttons:
             
-            pygame.draw.rect(screen,(80,80,80), button["rect"])
-            
-            text_time_button = self.font.render(button["text"], True, (255,255,255))
-            
-            
-            screen.blit(text_time_button, (button["rect"].x+10, button["rect"].y+8))
-            
-            # zvýraznění vybrané rychlosti
             color = (80,80,80)
             
             if button["speed"] == self.time_scale:
                 color = (200,200,0)
                 
             pygame.draw.rect(screen, color, button["rect"])
+        
+            text_cas = self.font.render(button["text"], True, (255,255,255))
+            text_rect = text_cas.get_rect(center=button["rect"].center)
+            
+            screen.blit(text_cas,text_rect)
+            
+            # zvýraznění vybrané rychlosti
+            
 
 # trénink
 class PracticeScreen(Screen):
