@@ -61,6 +61,14 @@ PACE = {
     "SAVE": {"pace": 0.5, "wear": 0.6},
 }
 
+track_map = [
+(400,300),
+(600,250),
+(750,300),
+(700,450),
+(500,500),
+(350,420),
+]
 class Driver: # jezdec
     def __init__(self, name, base_lap_time, tire):
         self.name = name
@@ -115,7 +123,12 @@ def get_speed(driver, race):
     # DRS boost
     if driver.drs_active:
         speed *= 1.15
-    
+
+    # safety car
+
+    if race.safety_car_active:
+        speed *= 0.5
+
     return speed
     
 PIT_TIME = 5.0
@@ -284,6 +297,23 @@ def calculate_gaps(drivers):
         
     return gaps
 
+def get_track_position(track_map, progress):
+
+    segment_float = progress * len(track_map)
+    segment_index = int(segment_float) % len(track_map)
+
+    next_index = (segment_index + 1) % len(track_map)
+
+    t = segment_float - segment_index
+
+    x1, y1 = track_map[segment_index]
+    x2, y2 = track_map[next_index]
+
+    x = x1 + (x2 - x1) * t
+    y = y1 + (y2 - y1) * t
+
+    return int(x), int(y)
+
                                     # screen classy
 # závod/ championship
 class RaceScreen(Screen):
@@ -327,6 +357,18 @@ class RaceScreen(Screen):
             {"text":"4x", "rect":pygame.Rect(860,500,60,40), "speed":4},
             {"text":"20x", "rect":pygame.Rect(930,500,60,40), "speed":20},
         ]
+
+        # tratě
+        self.current_track_index = 0
+        self.tracks = tracks
+
+        self.track = self.tracks[self.current_track_index]
+
+        self.track_map = self.track["map"]
+        self.track_length = self.track["length"]
+        self.race_laps = self.track["laps"]
+
+        self.championship_points = {}
         
     def update_drs(self):
     
@@ -352,6 +394,20 @@ class RaceScreen(Screen):
                 and self.race_time > 5 # start závodu
             ):
                 driver.drs_active = True 
+
+    def finish_race(self):
+
+        for pos, driver in enumerate(self.drivers):
+
+            if pos < 10:
+                pts = POINTS[pos]
+
+                if driver.name not in self.championship_points:
+                    self.championship_points[driver.name] = 0
+
+                self.championship_points[driver.name] += pts
+
+        self.current_track += 1
         
     # updaty
     def update(self, delta_time):
@@ -399,7 +455,7 @@ class RaceScreen(Screen):
                 driver.total_time += lap_time
                 driver.distance = 0
                 
-                if driver.current_lap >= RACE_LAPS:
+                if driver.current_lap >= self.race_laps:
                     driver.finished = True
                     
             if driver.in_pit:
@@ -424,6 +480,18 @@ class RaceScreen(Screen):
             else:
                 self.current_weather = "RAIN"
                 
+        if random.random() < 0.0005 and not self.safety_car_active:
+            self.safety_car_active = True
+            self.safety_car_timer = SAFETY_CAR_DURATION
+            print("SAFETY CAR DEPLOYED")
+
+        if self.safety_car_active:
+            self.safety_car_timer -= delta_time
+
+            if self.safety_car_timer <= 0:
+                self.safety_car_active = False
+                print("SAFETY CAR IN THIS LAP")
+
     def handle_battles(self):
         
         # seřadíme podle vzdálenosti
@@ -449,11 +517,10 @@ class RaceScreen(Screen):
                     # předjetí
                     self.drivers[i], self.drivers[i+1] = behind, front
                     
-                    print("front.name, front.distance", "|", "behind.name, behind.distance")
+                    print(front.name, front.distance, "|", behind.name, behind.distance)
                     
-        self.handle_battles()
         self.update_drs()
-        
+        self.handle_battles()
     # eventy                
     def handle_events(self, events):
         for event in events:
@@ -525,7 +592,7 @@ class RaceScreen(Screen):
         
             # seřazení podle času
         results = calculate_gaps(self.drivers)
-                         
+
         for i, (driver, gap) in enumerate(results):
             
             rect = pygame.Rect(20, y, 400, 35)
@@ -609,9 +676,26 @@ class RaceScreen(Screen):
             text_rect = text_cas.get_rect(center=button["rect"].center)
             
             screen.blit(text_cas,text_rect)
-            
-            # zvýraznění vybrané rychlosti
-            
+
+        #tratě
+        pygame.draw.lines(screen,(200,200,200),True, self.track_map, 4)
+
+        for driver in self.drivers:
+
+            progress = (driver.distance % self.track_length) / self.track_length
+
+            x,y = get_track_position(self.track_map, progress)
+
+            color = (255,0,0)
+
+            if driver == self.selected_driver:
+                color = (255,255,0)
+
+            pygame.draw.circle(screen, color, (x,y), 6)
+
+        if self.safety_car_active:
+            sc_text = font.render("SAFETY CAR", True, (255,200,0))
+            screen.blit(sc_text, (20,110))
 
 # trénink
 class PracticeScreen(Screen):
