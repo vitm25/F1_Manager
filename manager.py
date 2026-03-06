@@ -2,6 +2,7 @@ import pygame
 import math
 import sys
 import random
+from tracks import tracks
 pygame.init() # spusteni knihovny
 
 rozliseni_okna = (1000, 600)
