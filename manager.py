@@ -367,8 +367,13 @@ class RaceScreen(Screen):
         self.track_map = self.track["map"]
         self.track_length = self.track["length"]
         self.race_laps = self.track["laps"]
+        
+        self.track_image = pygame.image.load(self.track["image"])
+        self.tarck_image = pygame.trasform.sale(self.track_image. (600,400))
 
         self.championship_points = {}
+        
+        print(self.track)
         
     def update_drs(self):
     
@@ -407,7 +412,15 @@ class RaceScreen(Screen):
 
                 self.championship_points[driver.name] += pts
 
-        self.current_track += 1
+        self.current_track_index += 1
+        
+        if self.current_track_index >= len(self.tracks):
+            self.current_track_index = 0
+            
+        self.track = self.tracks[self.current_track_index]
+        self.track_map = self.track["map"]
+        self.track_lengthg = self.track["length"]
+        self.race_laps = self.track["laps"]
         
     # updaty
     def update(self, delta_time):
@@ -662,6 +675,8 @@ class RaceScreen(Screen):
         screen.blit(font.render("N", True, (255,255,255)), (panel_x+135, 265))
         screen.blit(font.render("SAVE", True, (255,255,255)), (panel_x+205, 265))
         
+        screen.blit(self.track_image,(50,150))
+        
         # vykreslení tlačítek času
         for button in self.speed_buttons:
             
@@ -696,6 +711,9 @@ class RaceScreen(Screen):
         if self.safety_car_active:
             sc_text = font.render("SAFETY CAR", True, (255,200,0))
             screen.blit(sc_text, (20,110))
+            
+        track_text = font.render(f"Track: {self.track['name']}", True, (255,255,255))
+        screen.blit/track_text, (20,140)
 
 # trénink
 class PracticeScreen(Screen):
