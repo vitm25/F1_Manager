@@ -369,7 +369,7 @@ class RaceScreen(Screen):
         self.race_laps = self.track["laps"]
         
         self.track_image = pygame.image.load(self.track["image"])
-        self.tarck_image = pygame.trasform.sale(self.track_image. (600,400))
+        self.tarck_image = pygame.trasform.sale(self.track_image, (600,400))
 
         self.championship_points = {}
         
