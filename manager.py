@@ -420,7 +420,7 @@ class RaceScreen(Screen):
             
         self.track = self.tracks[self.current_track_index]
         self.track_map = self.track["map"]
-        self.track_lengthg = self.track["length"]
+        self.track_length = self.track["length"]
         self.race_laps = self.track["laps"]
         
     # updaty
@@ -505,6 +505,18 @@ class RaceScreen(Screen):
             if self.safety_car_timer <= 0:
                 self.safety_car_active = False
                 print("SAFETY CAR IN THIS LAP")
+
+        keys = pygame.key.get_pressed()
+
+        if keys[pygame.K_LEFT]:
+            angle -=2
+
+        if keys[pygame.K_RIGHT]:
+            angle += 2
+
+        if keys[pygame.K_UP]:
+            car_x += math.cos(math.radians(angle)) * speed
+            car_y += math.sin(math.radians(angle)) * speed
 
     def handle_battles(self):
         
@@ -676,6 +688,13 @@ class RaceScreen(Screen):
         screen.blit(font.render("SAVE", True, (255,255,255)), (panel_x+205, 265))
         
         screen.blit(self.track_image,(50,150))
+
+        progress = driver.distance / self.track_length
+
+        index = int(progress *(len(self.track_map)-1))
+        x,y = self.track_map[index]
+
+        pygame.draw.circle(screen,(255,0,0),(x,y),5)
         
         # vykreslení tlačítek času
         for button in self.speed_buttons:
@@ -763,27 +782,12 @@ while True:
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
-
-    keys = pygame.key.get_pressed()
-
-    if keys[pygame.K_LEFT]:
-        angle -=2
-
-    if keys[pygame.K_RIGHT]:
-        angle += 2
-
-    if keys[pygame.K_UP]:
-        car_x += math.cos(math.radians(angle)) * speed
-        car_y += math.sin(math.radians(angle)) * speed
-
-    screen.fill((20,20,20))
-
-    pygame.draw.circle(screen,(255,0,0),(int(car_x), int(car_y)),6)
-
-    pygame.display.update()
     
     current_screen.handle_events(events)
     current_screen.update(delta_time)
+    
+    screen.fill((20,20,20))
+
     current_screen.draw(screen)
     
     pygame.display.flip()
