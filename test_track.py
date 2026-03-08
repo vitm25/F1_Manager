@@ -5,7 +5,7 @@ pygame.init()
 screen = pygame.display.set_mode((1920,1080))
 pygame.display.set_caption("F1 Track Test")
 
-track = pygame.image.load("changing_png/australia.png")
+track = pygame.image.load("changing_png/usacota.png")
 
 track = pygame.transform.scale(track,(1080,1080))
 

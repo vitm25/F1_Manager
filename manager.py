@@ -5,7 +5,8 @@ import random
 from tracks import tracks
 pygame.init() # spusteni knihovny
 
-rozliseni_okna = (1000, 600)
+WIDTH = 1920
+HEIGHT = 1080
 barvy_pozadi = (0, 0, 0,)
 FPS = 60
 RACE_ARE_WIDTH = 650
@@ -15,10 +16,23 @@ race_finished = False
 points_awarded = False
 
 #vykreslení okna
-screen = pygame.display.set_mode(rozliseni_okna)
+screen = pygame.display.set_mode([WIDTH, HEIGHT])
 pygame.display.set_caption("F1 manažer")
 
 clock = pygame.time.Clock()
+
+#načtení tratě
+track = pygame.image.load("changing_png/usacota.png")
+track = pygame.transform.scale(track,(1080,1080))
+
+track_x = (WIDTH - 1080) // 2
+track_y = (HEIGHT - 1080) //2
+
+car_x = WIDTH//2
+car_y = HEIGHT//2
+
+speed = 2
+angle = 0
 
 GAME_STATE_MENU = "MENU"
 GAME_STATE_CHAMPIONSHIP = "CHAMPIONSHIP"
@@ -297,20 +311,7 @@ def calculate_gaps(drivers):
         
     return gaps
 
-def get_track_position(track_map, progress):
 
-    segment_float = progress * len(track_map)
-    segment_index = int(segment_float) % len(track_map)
-
-    next_index = (segment_index + 1) % len(track_map)
-
-    t = segment_float - segment_index
-
-    x1, y1 = track_map[segment_index]
-    x2, y2 = track_map[next_index]
-
-    x = x1 + (x2 - x1) * t
-    y = y1 + (y2 - y1) * t
 
     return int(x), int(y)
 
@@ -369,7 +370,7 @@ class RaceScreen(Screen):
         self.race_laps = self.track["laps"]
         
         self.track_image = pygame.image.load(self.track["image"])
-        self.tarck_image = pygame.trasform.sale(self.track_image, (600,400))
+        self.track_image = pygame.transform.scale(self.track_image, (600,400))
 
         self.championship_points = {}
         
@@ -533,7 +534,6 @@ class RaceScreen(Screen):
                     print(front.name, front.distance, "|", behind.name, behind.distance)
                     
         self.update_drs()
-        self.handle_battles()
     # eventy                
     def handle_events(self, events):
         for event in events:
@@ -692,28 +692,13 @@ class RaceScreen(Screen):
             
             screen.blit(text_cas,text_rect)
 
-        #tratě
-        pygame.draw.lines(screen,(200,200,200),True, self.track_map, 4)
-
-        for driver in self.drivers:
-
-            progress = (driver.distance % self.track_length) / self.track_length
-
-            x,y = get_track_position(self.track_map, progress)
-
-            color = (255,0,0)
-
-            if driver == self.selected_driver:
-                color = (255,255,0)
-
-            pygame.draw.circle(screen, color, (x,y), 6)
-
+        
         if self.safety_car_active:
             sc_text = font.render("SAFETY CAR", True, (255,200,0))
             screen.blit(sc_text, (20,110))
             
         track_text = font.render(f"Track: {self.track['name']}", True, (255,255,255))
-        screen.blit/track_text, (20,140)
+        screen.blit(track_text, (20,140))
 
 # trénink
 class PracticeScreen(Screen):
@@ -778,6 +763,24 @@ while True:
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+
+    keys = pygame.key.get_pressed()
+
+    if keys[pygame.K_LEFT]:
+        angle -=2
+
+    if keys[pygame.K_RIGHT]:
+        angle += 2
+
+    if keys[pygame.K_UP]:
+        car_x += math.cos(math.radians(angle)) * speed
+        car_y += math.sin(math.radians(angle)) * speed
+
+    screen.fill((20,20,20))
+
+    pygame.draw.circle(screen,(255,0,0),(int(car_x), int(car_y)),6)
+
+    pygame.display.update()
     
     current_screen.handle_events(events)
     current_screen.update(delta_time)
