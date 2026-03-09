@@ -313,10 +313,11 @@ def calculate_gaps(drivers):
 
 
 
-    return int(x), int(y)
+    return int(x), int(y) 
 
-                                    # screen classy
+                                     # screen classy
 # závod/ championship
+
 class RaceScreen(Screen):
     def __init__(self):
         
