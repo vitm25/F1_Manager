@@ -2,8 +2,7 @@ import pygame
 import math
 import sys
 import random
-from tracks import tracks
-from tracks import track_path
+from tracks_data import tracks
 pygame.init() # spusteni knihovny
 
 WIDTH = 1920
@@ -118,6 +117,7 @@ class Driver: # jezdec
 
         self.track_index = 0
         self.progress = 0
+        self.angle = 0
         
 # výpočet akt. rychlosti
 def get_speed(driver, race):
@@ -377,11 +377,11 @@ class RaceScreen(Screen):
 
         self.track = self.tracks[self.current_track_index]
 
-        self.track_map = self.track["map"]
+        self.track_map = self.track["racing_line"]
         self.track_length = self.track["length"]
-        self.race_laps = self.track["laps"]
+        self.total_laps = self.track["laps"]
         
-        self.track_image = pygame.image.load(self.track["image"])
+        self.track_image = pygame.image.load(self.track["map"])
         self.track_image = pygame.transform.scale(self.track_image, (600,400))
 
         self.championship_points = {}
@@ -532,11 +532,11 @@ class RaceScreen(Screen):
             self.car_y += math.sin(math.radians(self.angle)) * self.speed
 
         # tratě
-        path = track_path
+        path = self.track_map
 
         for driver in self.drivers:
 
-            speed = 0.3
+            speed = 0.25
 
             driver.progress += speed * delta_time
 
@@ -544,7 +544,7 @@ class RaceScreen(Screen):
                 driver.progress = 0
                 driver.track_index += 1
 
-                if driver.track_index >= len(track_path):
+                if driver.track_index >= len(path):
                     driver.track_index = 0
                     driver.current_lap += 1
 
@@ -724,20 +724,24 @@ class RaceScreen(Screen):
         index = int(progress *(len(self.track_map)-1))
         x,y = self.track_map[index]
 
-        # auto
-        pygame.draw.circle(screen,(255,0,0),(int(self.car_x), int(self.car_y)),5)
-
         # tratě / body
+        path = self.track_map   
+
         for driver in self.drivers:
 
             i = driver.track_index
-            next_i = (i + 1) % len(track_path)
+            next_i = (i + 1) % len(path)
 
-            x1, y1 = track_path[i]
-            x2, y2 = track_path[next_i]
+            x1, y1 = path[i]
+            x2, y2 = path[next_i]
 
-            x = x1 + (x2 - x1) * driver.progress
-            y = y1 + (y2 - y1) * driver.progress
+            track_offset_x = 50
+            track_offset_y = 150
+
+            dx = x2 - x1
+            dy = y2 - y1
+
+            driver.angle = math.degrees(math.atan2(dy, dx))
 
             pygame.draw.circle(screen,(255,0,0),(int(x),int(y)),6)
 
@@ -760,15 +764,17 @@ class RaceScreen(Screen):
             else:
                 driver.drs_active = False
 
+            path = self.track_map
+            
             for i in range(drs_zone_start, drs_zone_end):
 
-                x2,y2 = track_path[i]
-                x2,y2 = track_path[i+1] 
+                x1,y1 = path[i]
+                x2,y2 = path[i+1] 
 
                 pygame.draw.line(screen, (0,200,255),(x1,y1), (x2,y2), 4)
 
-            for p in track_path:
-                pygame.draw.circle(screen,(0,255,255),p,4)
+            for p in self.track_map:
+                pygame.draw.circle(screen,(0,255,255),(p[0]+50,p[1]+150),4)
         
         # vykreslení tlačítek času
         for button in self.speed_buttons:
