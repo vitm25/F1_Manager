@@ -1,0 +1,7 @@
+(0,0), pygame.FULLSCREEN
+
+jak udělat kvalifikaci
+
+jak udělat 20 jezdců a 10 týmů
+
+jak udělat skutečný kalendář F1 (24 tratí)
