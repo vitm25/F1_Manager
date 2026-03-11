@@ -2,6 +2,7 @@ import pygame
 import math
 import sys
 import random
+from tracks import tracks
 from tracks_data import tracks
 pygame.init() # spusteni knihovny
 
@@ -22,7 +23,7 @@ pygame.display.set_caption("F1 manažer")
 clock = pygame.time.Clock()
 
 #načtení tratě
-track = pygame.image.load("changing_png/usacota.png")
+track = pygame.image.load("tracks/usacota.png")
 track = pygame.transform.scale(track,(1080,1080))
 
 track_x = (WIDTH - 1080) // 2
@@ -375,15 +376,15 @@ class RaceScreen(Screen):
         self.current_track_index = 0
         self.tracks = tracks
 
-        self.track = self.tracks[self.current_track_index]
+        self.track = tracks[self.current_track_index]
 
         self.track_map = self.track["racing_line"]
         self.track_length = self.track["length"]
         self.total_laps = self.track["laps"]
         
         self.track_image = pygame.image.load(self.track["map"])
-        self.track_image = pygame.transform.scale(self.track_image, (600,400))
-
+        self.track_image = pygame.transform.scale(self.track_image, (600, 400))
+        
         self.championship_points = {}
         
         print(self.track)
@@ -443,7 +444,7 @@ class RaceScreen(Screen):
         
         delta_time *= self.time_scale 
         
-        race_progress = max(d.current_lap for d in self.drivers) / RACE_LAPS
+        race_progress = max(d.current_lap for d in self.drivers) / self.race_laps
         for driver in self.drivers:
             driver.ai_decision_timer += delta_time
         self.race_time += delta_time
