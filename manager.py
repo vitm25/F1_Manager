@@ -362,14 +362,26 @@ class RaceScreen(Screen):
         self.track_length = self.track["length"]
         self.race_laps = self.track["laps"]
 
-        self.track_image = pygame.image.load(self.track["map"])
-        self.track_image = pygame.transform.scale(self.track_image, (600, 400))
+        self.championship_points = {}
 
-        # pozice obrázku tratě na obrazovce
+        self.track_display_width = 600
+        self.track_display_height = 400
+
         self.track_offset_x = 50
         self.track_offset_y = 150
 
-        self.championship_points = {}
+        # původní velikost, na které jsi klikával body v editoru
+        self.track_source_width = 1080
+        self.track_source_height = 1080
+
+        self.scale_x = self.track_display_width / self.track_source_width
+        self.scale_y = self.track_display_height / self.track_source_height
+
+        self.track_image = pygame.image.load(self.track["map"])
+        self.track_image = pygame.transform.scale(
+            self.track_image,
+            (self.track_display_width, self.track_display_height)
+        )
 
         print(self.track)
         
@@ -422,75 +434,26 @@ class RaceScreen(Screen):
         
     # updaty
     def update(self, delta_time):
-        
         if self.paused:
             return
-        
-        delta_time *= self.time_scale 
-        
-        race_progress = max(d.current_lap for d in self.drivers) / self.race_laps
-        for driver in self.drivers:
-            driver.ai_decision_timer += delta_time
+
+        delta_time *= self.time_scale
         self.race_time += delta_time
-        
-        for driver in self.drivers:
-            
-            if driver != self.selected_driver and driver.ai_decision_timer > 2:
-                driver.pace_mode = ai_choose_pace(driver, race_progress, self.current_weather)
-                driver.ai_decision_timer = 0
-                
-            if driver != self.selected_driver:
-                if ai_should_pit(driver, self):
-                    driver.in_pit = True
-                    driver.pit_timer = 0
-                    driver.last_pit_lap = driver.current_lap
-                    driver.tire = ai_choose_tire(driver, self.current_weather)
-                    print(driver.name, "AI PIT STOP")
-            
-            if getattr(driver, "finished", False):
-                continue
-            
-            speed = get_speed(driver, self)
-            driver.distance += speed * delta_time * 100
-            
-            driver.lap_timer += delta_time
-            pace = PACE[driver.pace_mode]
-            lap_time = driver.base_lap_time + pace["pace"]
-            
-            driver.tire_wear += delta_time * 0.02 * pace["wear"]
-            driver.tire_wear = min(driver.tire_wear, 1.0)
-            
-            if driver.lap_timer >= lap_time:
-                driver.lap_timer = 0
-                driver.current_lap += 1
-                driver.total_time += lap_time
-                driver.distance = 0
-                
-                if driver.current_lap >= self.race_laps:
-                    driver.finished = True
-                    
-            if driver.in_pit:
-                driver.pit_timer += delta_time
-                
-                if driver.pit_timer >= PIT_TIME:
-                    driver.in_pit = False
-                    driver.tire_wear = 0.0
-                    driver.tire = random.choice(["SOFT","MEDIUM","HARD"])
-                    
+
+        # počasí
         self.weather_timer += delta_time
-        
         if self.weather_timer > 12:
             self.weather_timer = 0
-            
+
             roll = random.random()
-            
             if roll < 0.6:
                 self.current_weather = "SUN"
             elif roll < 0.85:
                 self.current_weather = "CLOUD"
             else:
                 self.current_weather = "RAIN"
-                
+
+        # safety car
         if random.random() < 0.0005 and not self.safety_car_active:
             self.safety_car_active = True
             self.safety_car_timer = SAFETY_CAR_DURATION
@@ -498,42 +461,83 @@ class RaceScreen(Screen):
 
         if self.safety_car_active:
             self.safety_car_timer -= delta_time
-
             if self.safety_car_timer <= 0:
                 self.safety_car_active = False
                 print("SAFETY CAR IN THIS LAP")
 
-        # auto
-        keys = pygame.key.get_pressed()
+        # progress závodu
+        race_progress = max(d.current_lap for d in self.drivers) / self.race_laps if self.race_laps > 0 else 0
 
-        if keys[pygame.K_LEFT]:
-            self.angle -= 2
-
-        if keys[pygame.K_RIGHT]:
-            self.angle += 2
-
-        if keys[pygame.K_UP]:
-            self.car_x += math.cos(math.radians(self.angle)) * self.speed
-            self.car_y += math.sin(math.radians(self.angle)) * self.speed
-
-        # tratě
         path = self.track_map
 
         for driver in self.drivers:
+            if driver.finished:
+                continue
 
-            path_speed = get_speed(driver, self) * 0.3
+            driver.ai_decision_timer += delta_time
 
-            driver.progress += path_speed * delta_time
+            # AI pace
+            if driver != self.selected_driver and driver.ai_decision_timer > 2:
+                driver.pace_mode = ai_choose_pace(driver, race_progress, self.current_weather)
+                driver.ai_decision_timer = 0
 
-            if driver.progress >= 1:
-                driver.progress = 0
+            # AI pit stop
+            if driver != self.selected_driver:
+                if ai_should_pit(driver, self):
+                    driver.in_pit = True
+                    driver.pit_timer = 0
+                    driver.last_pit_lap = driver.current_lap
+                    driver.tire = ai_choose_tire(driver, self.current_weather)
+                    print(driver.name, "AI PIT STOP")
+
+            # pit stop timer
+            if driver.in_pit:
+                driver.pit_timer += delta_time
+                if driver.pit_timer >= PIT_TIME:
+                    driver.in_pit = False
+                    driver.tire_wear = 0.0
+                    driver.tire = random.choice(["SOFT", "MEDIUM", "HARD"])
+                continue
+
+            # opotřebení pneumatik
+            pace = PACE[driver.pace_mode]
+            driver.tire_wear += delta_time * 0.02 * pace["wear"]
+            driver.tire_wear = min(driver.tire_wear, 1.0)
+
+            # racing line movement
+            i = driver.track_index
+            next_i = (i + 1) % len(path)
+
+            x1, y1 = path[i]
+            x2, y2 = path[next_i]
+
+            segment_length = math.hypot(x2 - x1, y2 - y1)
+
+            # základ rychlosti auta
+            base_speed = get_speed(driver, self) * 220.0
+
+            # pace mode ovlivní rychlost
+            if driver.pace_mode == "PUSH":
+                base_speed *= 1.08
+            elif driver.pace_mode == "SAVE":
+                base_speed *= 0.90
+
+            if segment_length > 0:
+                driver.progress += (base_speed * delta_time) / segment_length
+
+            while driver.progress >= 1:
+                driver.progress -= 1
                 driver.track_index += 1
 
                 if driver.track_index >= len(path):
                     driver.track_index = 0
                     driver.current_lap += 1
+                    driver.total_time = self.race_time
 
-        self.handle_battles() 
+                    if driver.current_lap >= self.race_laps:
+                        driver.finished = True
+
+        self.handle_battles()  
 
     def handle_battles(self):
         
@@ -709,31 +713,26 @@ class RaceScreen(Screen):
         screen.blit(self.track_image, (self.track_offset_x, self.track_offset_y))
 
         path = self.track_map
-
-        # DRS zone drawing
         drs_zone_start = 4
         drs_zone_end = 7
 
+        # DRS zone drawing
         for i in range(drs_zone_start, min(drs_zone_end, len(path) - 1)):
             x1, y1 = path[i]
             x2, y2 = path[i + 1]
 
-            pygame.draw.line(
-                screen,
-                (0, 200, 255),
-                (x1 + self.track_offset_x, y1 + self.track_offset_y),
-                (x2 + self.track_offset_x, y2 + self.track_offset_y),
-                4
-            )
+            x1 = x1 * self.scale_x + self.track_offset_x
+            y1 = y1 * self.scale_y + self.track_offset_y
+            x2 = x2 * self.scale_x + self.track_offset_x
+            y2 = y2 * self.scale_y + self.track_offset_y
+
+            pygame.draw.line(screen, (0, 200, 255), (x1, y1), (x2, y2), 4)
 
         # debug racing line points
         for p in path:
-            pygame.draw.circle(
-                screen,
-                (0, 255, 255),
-                (p[0] + self.track_offset_x, p[1] + self.track_offset_y),
-                4
-            )
+            px = int(p[0] * self.scale_x + self.track_offset_x)
+            py = int(p[1] * self.scale_y + self.track_offset_y)
+            pygame.draw.circle(screen, (0, 255, 255), (px, py), 4)
 
         # cars on racing line
         colors = [
@@ -746,11 +745,16 @@ class RaceScreen(Screen):
 
         for idx, driver in enumerate(self.drivers):
             i = driver.track_index
-            path = self.track_map
             next_i = (i + 1) % len(path)
 
             x1, y1 = path[i]
             x2, y2 = path[next_i]
+
+            # scale to displayed track size
+            x1 = x1 * self.scale_x
+            y1 = y1 * self.scale_y
+            x2 = x2 * self.scale_x
+            y2 = y2 * self.scale_y
 
             x = x1 + (x2 - x1) * driver.progress + self.track_offset_x
             y = y1 + (y2 - y1) * driver.progress + self.track_offset_y
@@ -759,10 +763,7 @@ class RaceScreen(Screen):
             dy = y2 - y1
             driver.angle = math.degrees(math.atan2(dy, dx))
 
-            if drs_zone_start <= driver.track_index <= drs_zone_end:
-                driver.drs_active = True
-            else:
-                driver.drs_active = False
+            driver.drs_active = drs_zone_start <= driver.track_index <= drs_zone_end
 
             color = colors[idx % len(colors)]
             if driver == self.selected_driver:
