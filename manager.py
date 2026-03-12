@@ -2,7 +2,6 @@ import pygame
 import math
 import sys
 import random
-from tracks import tracks
 from tracks_data import tracks
 pygame.init() # spusteni knihovny
 
@@ -12,7 +11,6 @@ barvy_pozadi = (0, 0, 0,)
 FPS = 60
 RACE_ARE_WIDTH = 650
 
-RACE_LAPS = 20
 race_finished = False
 points_awarded = False
 
@@ -21,19 +19,6 @@ screen = pygame.display.set_mode([WIDTH, HEIGHT])
 pygame.display.set_caption("F1 manažer")
 
 clock = pygame.time.Clock()
-
-#načtení tratě
-track = pygame.image.load("tracks/usacota.png")
-track = pygame.transform.scale(track,(1080,1080))
-
-track_x = (WIDTH - 1080) // 2
-track_y = (HEIGHT - 1080) //2
-
-car_x = WIDTH//2
-car_y = HEIGHT//2
-
-speed = 2
-angle = 0
 
 GAME_STATE_MENU = "MENU"
 GAME_STATE_CHAMPIONSHIP = "CHAMPIONSHIP"
@@ -119,6 +104,8 @@ class Driver: # jezdec
         self.track_index = 0
         self.progress = 0
         self.angle = 0
+
+        self.finished = False
         
 # výpočet akt. rychlosti
 def get_speed(driver, race):
@@ -316,33 +303,28 @@ def calculate_gaps(drivers):
         
     return gaps
 
-
-
-    return int(x), int(y) 
-
                                      # screen classy
 # závod/ championship
 
 class RaceScreen(Screen):
     def __init__(self):
-        
         self.font = pygame.font.SysFont("arial", 22)
-        self.race_time = 0.0 # čas
-        
+        self.race_time = 0.0
+
         # počasí
         self.current_weather = "SUN"
         self.weather_timer = 0.0
-        
-        #safety car/ VSC/ red flag
+
+        # safety car / VSC / red flag
         self.safety_car_active = False
         self.safety_car_timer = 0.0
-        
+
         self.vsc_active = False
         self.vsc_timer = 0.0
-        
+
         self.red_flag_active = False
         self.red_flag_timer = 0.0
-        
+
         # jezdci
         self.drivers = [
             Driver("Driver A", 3.0, "SOFT"),
@@ -350,43 +332,45 @@ class RaceScreen(Screen):
             Driver("Driver C", 3.0, "SOFT"),
         ]
         self.selected_driver = self.drivers[0]
-        
+
         # ovládání času
         self.time_scale = 1
-        self.time_modes = [1,2,4,20]
+        self.time_modes = [1, 2, 4, 20]
         self.time_index = 0
         self.paused = False
-        
+
         # tlačítka na ovládání rychlosti
         self.speed_buttons = [
-            {"text":"1x", "rect":pygame.Rect(720,500,60,40), "speed":1},
-            {"text":"2x", "rect":pygame.Rect(790,500,60,40), "speed":2},
-            {"text":"4x", "rect":pygame.Rect(860,500,60,40), "speed":4},
-            {"text":"20x", "rect":pygame.Rect(930,500,60,40), "speed":20},
+            {"text": "1x", "rect": pygame.Rect(720, 500, 60, 40), "speed": 1},
+            {"text": "2x", "rect": pygame.Rect(790, 500, 60, 40), "speed": 2},
+            {"text": "4x", "rect": pygame.Rect(860, 500, 60, 40), "speed": 4},
+            {"text": "20x", "rect": pygame.Rect(930, 500, 60, 40), "speed": 20},
         ]
 
-        # auto
+        # debug auto
         self.car_x = 300
         self.car_y = 300
-        
         self.angle = 0
         self.speed = 2
 
         # tratě
         self.current_track_index = 0
         self.tracks = tracks
-
-        self.track = tracks[self.current_track_index]
+        self.track = self.tracks[self.current_track_index]
 
         self.track_map = self.track["racing_line"]
         self.track_length = self.track["length"]
-        self.total_laps = self.track["laps"]
-        
+        self.race_laps = self.track["laps"]
+
         self.track_image = pygame.image.load(self.track["map"])
         self.track_image = pygame.transform.scale(self.track_image, (600, 400))
-        
+
+        # pozice obrázku tratě na obrazovce
+        self.track_offset_x = 50
+        self.track_offset_y = 150
+
         self.championship_points = {}
-        
+
         print(self.track)
         
     def update_drs(self):
@@ -432,7 +416,7 @@ class RaceScreen(Screen):
             self.current_track_index = 0
             
         self.track = self.tracks[self.current_track_index]
-        self.track_map = self.track["map"]
+        self.track_map = self.track["racing_line"]
         self.track_length = self.track["length"]
         self.race_laps = self.track["laps"]
         
@@ -537,9 +521,9 @@ class RaceScreen(Screen):
 
         for driver in self.drivers:
 
-            speed = 0.25
+            path_speed = get_speed(driver, self) * 0.3
 
-            driver.progress += speed * delta_time
+            driver.progress += path_speed * delta_time
 
             if driver.progress >= 1:
                 driver.progress = 0
@@ -548,6 +532,8 @@ class RaceScreen(Screen):
                 if driver.track_index >= len(path):
                     driver.track_index = 0
                     driver.current_lap += 1
+
+        self.handle_battles() 
 
     def handle_battles(self):
         
@@ -628,169 +614,172 @@ class RaceScreen(Screen):
                         self.time_scale = button["speed"]
     # kreslení
     def draw(self, screen):
-        screen.fill((0,100,0))
-        
-        # race time
-        time_text = font.render(f"Race time: {self.race_time:.1f}", True, (255,255,255))
-        screen.blit(time_text, (20,20))
-        
-        # čas
-        speed_text = font.render(f"Speed: {self.time_scale}x", True, (255,255,255))
-        screen.blit(speed_text, (20,80))
-        
-        # počasí
-        weather_text = font.render(f"Weather: {self.current_weather}", True, (255,255,0))
-        screen.blit(weather_text, (20,50))
-        
-        # jezdci / leaderboard
-        y = 125
-        self.driver_rects = [] # seznam klikacích oblastí
-        
-            # seřazení podle času
+        screen.fill((0, 100, 0))
+
+        # race info
+        time_text = self.font.render(f"Race time: {self.race_time:.1f}", True, (255, 255, 255))
+        screen.blit(time_text, (20, 20))
+
+        speed_text = self.font.render(f"Speed: {self.time_scale}x", True, (255, 255, 255))
+        screen.blit(speed_text, (20, 80))
+
+        weather_text = self.font.render(f"Weather: {self.current_weather}", True, (255, 255, 0))
+        screen.blit(weather_text, (20, 50))
+
+        if self.safety_car_active:
+            sc_text = self.font.render("SAFETY CAR", True, (255, 200, 0))
+            screen.blit(sc_text, (20, 110))
+
+        track_text = self.font.render(f"Track: {self.track['name']}", True, (255, 255, 255))
+        screen.blit(track_text, (20, 140))
+
+        # leaderboard
+        y = 180
+        self.driver_rects = []
         results = calculate_gaps(self.drivers)
 
         for i, (driver, gap) in enumerate(results):
-            
             rect = pygame.Rect(20, y, 400, 35)
             self.driver_rects.append((rect, driver))
-            
-            # zvýraznění vybraného jezdce
+
             if driver == self.selected_driver:
-                pygame.draw.rect(screen, (80,80,80), rect)
-                
+                pygame.draw.rect(screen, (80, 80, 80), rect)
+
             if i == 0:
                 gap_text = "LEADER"
             else:
                 gap_text = f"+{gap:.1f}s"
-                
-            color = (255,255,0) if i == 0 else (255,255,255)
+
+            color = (255, 255, 0) if i == 0 else (255, 255, 255)
             drs = "DRS" if driver.drs_active else ""
-        
-            text = font.render(f"p{i+1} {driver.name} {drs} | {gap_text} | Lap {driver.current_lap}", True, (color))
-            
-            screen.blit(text, (20,y))
+
+            text = self.font.render(
+                f"P{i+1} {driver.name} {drs} | {gap_text} | Lap {driver.current_lap}",
+                True,
+                color
+            )
+            screen.blit(text, (20, y))
             y += 45
-            
-        # zmražení času
+
+        # paused
         if self.paused:
-            pause_text = font.render("PAUSED", True, (255,0,0))
-            screen.blit(pause_text, (450,50))
-            
-                                    # panel ovladani
-        # box box
+            pause_text = self.font.render("PAUSED", True, (255, 0, 0))
+            screen.blit(pause_text, (450, 50))
+
+        # manager panel
         panel_x = 700
         panel_rect = pygame.Rect(panel_x, 0, 300, 600)
-        
-        pygame.draw.rect(screen, (30,30,30), panel_rect)
-        pygame.draw.line(screen, (80,80,80), (panel_x, 0), (panel_x, 600), 2)
-        
-        driver = self.selected_driver
-        
-        name_text = font.render(driver.name, True, (255,255,255))
+
+        pygame.draw.rect(screen, (30, 30, 30), panel_rect)
+        pygame.draw.line(screen, (80, 80, 80), (panel_x, 0), (panel_x, 600), 2)
+
+        selected = self.selected_driver
+
+        name_text = self.font.render(selected.name, True, (255, 255, 255))
         screen.blit(name_text, (panel_x + 20, 40))
-        
-        tire_text = font.render(f"Tire: {driver.tire}", True, (255,255,255))
+
+        tire_text = self.font.render(f"Tire: {selected.tire}", True, (255, 255, 255))
         screen.blit(tire_text, (panel_x + 20, 80))
-        
-        wear_percent = int(driver.tire_wear * 100)
-        wear_text = font.render(f"Wear: {wear_percent}%", True, (255,255,255))
+
+        wear_percent = int(selected.tire_wear * 100)
+        wear_text = self.font.render(f"Wear: {wear_percent}%", True, (255, 255, 255))
         screen.blit(wear_text, (panel_x + 20, 120))
-        
-        self.pit_button = pygame.Rect(panel_x +20, 180,200,50)
-        
-        pygame.draw.rect(screen, (200,50,50), self.pit_button)
-        pit_text = font.render("PIT STOP", True, (255,255,255))
+
+        self.pit_button = pygame.Rect(panel_x + 20, 180, 200, 50)
+        pygame.draw.rect(screen, (200, 50, 50), self.pit_button)
+        pit_text = self.font.render("PIT STOP", True, (255, 255, 255))
         screen.blit(pit_text, (panel_x + 45, 190))
-        
-        pace_text = font.render(f"Pace: {driver.pace_mode}", True, (255,255,0))
-        screen.blit(pace_text, (panel_x + 20,320))
-        
-        # push, neutral, save
+
+        pace_text = self.font.render(f"Pace: {selected.pace_mode}", True, (255, 255, 0))
+        screen.blit(pace_text, (panel_x + 20, 320))
+
         self.push_button = pygame.Rect(panel_x + 20, 260, 80, 40)
         self.neutral_button = pygame.Rect(panel_x + 110, 260, 80, 40)
         self.save_button = pygame.Rect(panel_x + 200, 260, 80, 40)
-        
-        pygame.draw.rect(screen, (200,60,60), self.push_button)
-        pygame.draw.rect(screen, (120,120,120), self.neutral_button)
-        pygame.draw.rect(screen, (60,120,200), self.save_button)
-        
-        screen.blit(font.render("PUSH", True, (255,255,255)), (panel_x+25, 265))
-        screen.blit(font.render("N", True, (255,255,255)), (panel_x+135, 265))
-        screen.blit(font.render("SAVE", True, (255,255,255)), (panel_x+205, 265))
-        
-        screen.blit(self.track_image,(50,150))
 
-        progress = driver.distance / self.track_length
+        pygame.draw.rect(screen, (200, 60, 60), self.push_button)
+        pygame.draw.rect(screen, (120, 120, 120), self.neutral_button)
+        pygame.draw.rect(screen, (60, 120, 200), self.save_button)
 
-        index = int(progress *(len(self.track_map)-1))
-        x,y = self.track_map[index]
+        screen.blit(self.font.render("PUSH", True, (255, 255, 255)), (panel_x + 25, 265))
+        screen.blit(self.font.render("N", True, (255, 255, 255)), (panel_x + 135, 265))
+        screen.blit(self.font.render("SAVE", True, (255, 255, 255)), (panel_x + 205, 265))
 
-        # tratě / body
-        path = self.track_map   
+        # track image
+        screen.blit(self.track_image, (self.track_offset_x, self.track_offset_y))
 
-        for driver in self.drivers:
+        path = self.track_map
 
+        # DRS zone drawing
+        drs_zone_start = 4
+        drs_zone_end = 7
+
+        for i in range(drs_zone_start, min(drs_zone_end, len(path) - 1)):
+            x1, y1 = path[i]
+            x2, y2 = path[i + 1]
+
+            pygame.draw.line(
+                screen,
+                (0, 200, 255),
+                (x1 + self.track_offset_x, y1 + self.track_offset_y),
+                (x2 + self.track_offset_x, y2 + self.track_offset_y),
+                4
+            )
+
+        # debug racing line points
+        for p in path:
+            pygame.draw.circle(
+                screen,
+                (0, 255, 255),
+                (p[0] + self.track_offset_x, p[1] + self.track_offset_y),
+                4
+            )
+
+        # cars on racing line
+        colors = [
+            (255, 0, 0),
+            (0, 255, 0),
+            (0, 150, 255),
+            (255, 200, 0),
+            (255, 0, 255),
+        ]
+
+        for idx, driver in enumerate(self.drivers):
             i = driver.track_index
             next_i = (i + 1) % len(path)
 
             x1, y1 = path[i]
             x2, y2 = path[next_i]
 
-            track_offset_x = 50
-            track_offset_y = 150
+            x = x1 + (x2 - x1) * driver.progress + self.track_offset_x
+            y = y1 + (y2 - y1) * driver.progress + self.track_offset_y
 
             dx = x2 - x1
             dy = y2 - y1
-
             driver.angle = math.degrees(math.atan2(dy, dx))
-
-            pygame.draw.circle(screen,(255,0,0),(int(x),int(y)),6)
-
-            colors = [
-            (255,0,0), 
-            (0,255,0),
-            (0,150,255),
-            (255,200,0),
-            (255,0,255),
-            ]
-
-            color = colors[self.drivers.index(driver) % len(colors)]
-            pygame.draw.circle(screen, color, (int(x), int(y)),5)
-
-            drs_zone_start = 4
-            drs_zone_end = 7
 
             if drs_zone_start <= driver.track_index <= drs_zone_end:
                 driver.drs_active = True
             else:
                 driver.drs_active = False
 
-            path = self.track_map
-            
-            for i in range(drs_zone_start, drs_zone_end):
+            color = colors[idx % len(colors)]
+            if driver == self.selected_driver:
+                color = (255, 255, 255)
 
-                x1,y1 = path[i]
-                x2,y2 = path[i+1] 
+            pygame.draw.circle(screen, color, (int(x), int(y)), 6)
 
-                pygame.draw.line(screen, (0,200,255),(x1,y1), (x2,y2), 4)
-
-            for p in self.track_map:
-                pygame.draw.circle(screen,(0,255,255),(p[0]+50,p[1]+150),4)
-        
-        # vykreslení tlačítek času
+        # speed buttons
         for button in self.speed_buttons:
-            
-            color = (80,80,80)
-            
+            color = (80, 80, 80)
             if button["speed"] == self.time_scale:
-                color = (200,200,0)
-                
+                color = (200, 200, 0)
+
             pygame.draw.rect(screen, color, button["rect"])
-        
-            text_cas = self.font.render(button["text"], True, (255,255,255))
+
+            text_cas = self.font.render(button["text"], True, (255, 255, 255))
             text_rect = text_cas.get_rect(center=button["rect"].center)
-            
-            screen.blit(text_cas,text_rect)
+            screen.blit(text_cas, text_rect)
 
         
         if self.safety_car_active:

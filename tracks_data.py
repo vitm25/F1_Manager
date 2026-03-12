@@ -1,27 +1,27 @@
 from racing_lines.australia import racing_line as australia_line
-from racing_lines.china import racing_line as china_line
+from racing_lines.shanghai import racing_line as china_line
 from racing_lines.japan import racing_line as japan_line
 from racing_lines.bahrain import racing_line as bahrain_line
-from racing_lines.saudi_arabia import racing_line as saudi_line
-from racing_lines.miami import racing_line as miami_line
-from racing_lines.imola import racing_line as imola_line
+from racing_lines.saudiarabia import racing_line as saudi_line
+from racing_lines.usamiami import racing_line as miami_line
+from racing_lines.italyimola import racing_line as imola_line
 from racing_lines.monaco import racing_line as monaco_line
 from racing_lines.canada import racing_line as canada_line
 from racing_lines.spain import racing_line as spain_line
 from racing_lines.austria import racing_line as austria_line
-from racing_lines.silverstone import racing_line as silverstone_line
+from racing_lines.greatbritain import racing_line as silverstone_line
 from racing_lines.hungary import racing_line as hungary_line
 from racing_lines.belgium import racing_line as belgium_line
 from racing_lines.netherlands import racing_line as netherlands_line
-from racing_lines.monza import racing_line as monza_line
+from racing_lines.italymonza import racing_line as monza_line
 from racing_lines.azerbaijan import racing_line as azerbaijan_line
 from racing_lines.singapore import racing_line as singapore_line
-from racing_lines.usa import racing_line as usa_line
+from racing_lines.usacota import racing_line as usa_line
 from racing_lines.mexico import racing_line as mexico_line
 from racing_lines.brazil import racing_line as brazil_line
-from racing_lines.las_vegas import racing_line as vegas_line
+from racing_lines.usavegas import racing_line as vegas_line
 from racing_lines.qatar import racing_line as qatar_line
-from racing_lines.abu_dhabi import racing_line as abu_dhabi_line
+from racing_lines.abudhabi import racing_line as abu_dhabi_line
 
 tracks = [
 
