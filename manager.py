@@ -746,6 +746,7 @@ class RaceScreen(Screen):
 
         for idx, driver in enumerate(self.drivers):
             i = driver.track_index
+            path = self.track_map
             next_i = (i + 1) % len(path)
 
             x1, y1 = path[i]
