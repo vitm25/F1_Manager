@@ -44,8 +44,8 @@ mode = MODE_LINE
 racing_line = []
 pit_lane = []
 
-drs_start = None
-drs_end = None
+drs_zones = []
+current_drs_start = None
 
 sector1 = None
 sector2 = None
@@ -78,7 +78,7 @@ def save_track_data():
     relative_racing_line = get_relative_points(racing_line)
     relative_pit_lane = get_relative_points(pit_lane)
 
-    drs_tuple = (drs_start, drs_end)
+    drs_list = drs_zones[:] 
     sectors_list = [sector1, sector2]
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
@@ -89,7 +89,7 @@ def save_track_data():
             f.write(f"        ({x}, {y}),\n")
         f.write("    ],\n")
 
-        f.write(f'    "drs_zone": {drs_tuple},\n')
+        f.write(f'    "drs_zone": {drs_list},\n')
 
         f.write('    "pit_lane": [\n')
         for x, y in relative_pit_lane:
@@ -164,18 +164,20 @@ def draw_polyline(points, color, closed=False, width=3):
         pygame.draw.lines(screen, color, closed, points, width)
 
 def draw_drs_zone():
-    if drs_start is None or drs_end is None:
-        return
     if len(racing_line) < 2:
         return
-    if drs_start >= len(racing_line) or drs_end >= len(racing_line):
-        return
 
-    start = min(drs_start, drs_end)
-    end = max(drs_start, drs_end)
+    for zone in drs_zones:
+        start, end = zone
 
-    for i in range(start, min(end, len(racing_line) - 1)):
-        pygame.draw.line(screen, DRS_COLOR, racing_line[i], racing_line[i + 1], 6)
+        if start >= len(racing_line) or end >= len(racing_line):
+            continue
+
+        a = min(start, end)
+        b = max(start, end)
+
+        for i in range(a, min(b, len(racing_line) - 1)):
+            pygame.draw.line(screen, DRS_COLOR, racing_line[i], racing_line[i + 1], 6)
 
 def draw_sector_markers():
     if sector1 is not None and 0 <= sector1 < len(racing_line):
@@ -191,8 +193,8 @@ def clear_current_mode():
     elif mode == MODE_PIT:
         pit_lane = []
     elif mode == MODE_DRS:
-        drs_start = None
-        drs_end = None
+        drs_zones = []
+        current_drs_start = None
     elif mode == MODE_SECTOR:
         sector1 = None
         sector2 = None
@@ -241,15 +243,15 @@ def handle_click(mouse_pos):
         pit_lane.append(mouse_pos)
 
     elif mode == MODE_DRS:
+        global current_drs_start, drs_zones
+
         idx = find_nearest_point_index(mouse_pos, racing_line)
         if idx is not None:
-            if drs_start is None:
-                drs_start = idx
-            elif drs_end is None:
-                drs_end = idx
+            if current_drs_start is None:
+                current_drs_start = idx
             else:
-                drs_start = idx
-                drs_end = None
+                drs_zones.append((current_drs_start, idx))
+                current_drs_start = None
 
     elif mode == MODE_SECTOR:
         idx = find_nearest_point_index(mouse_pos, racing_line)
