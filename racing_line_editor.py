@@ -17,8 +17,8 @@ small_font = pygame.font.SysFont("arial", 18)
 # =========================================================
 # NASTAVENÍ
 # =========================================================
-TRACK_IMAGE_PATH = "tracks/australia.png"
-OUTPUT_FILE = "racing_lines/australia.py"
+TRACK_IMAGE_PATH = "tracks/belgium.png"
+OUTPUT_FILE = "racing_lines/belgium.py"
 
 DISPLAY_WIDTH = 1000
 DISPLAY_HEIGHT = 1000
@@ -29,7 +29,7 @@ PIT_COLOR = (255, 140, 0)
 DRS_COLOR = (0, 200, 255)
 SECTOR_COLOR = (255, 255, 0)
 POINT_COLOR = (0, 255, 255)
-SELECTED_COLOR = (255, 255, 255)
+TEXT_COLOR = (255, 255, 255)
 
 MODE_LINE = "LINE"
 MODE_PIT = "PIT"
@@ -44,13 +44,12 @@ mode = MODE_LINE
 racing_line = []
 pit_lane = []
 
+# více DRS zón
 drs_zones = []
 current_drs_start = None
 
-sector1 = None
-sector2 = None
-
-selected_point_index = None
+# 2 body -> 3 sektory
+sector_points = []
 
 # =========================================================
 # LOAD TRACK
@@ -78,9 +77,6 @@ def save_track_data():
     relative_racing_line = get_relative_points(racing_line)
     relative_pit_lane = get_relative_points(pit_lane)
 
-    drs_list = drs_zones[:] 
-    sectors_list = [sector1, sector2]
-
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write("track_data = {\n")
 
@@ -89,14 +85,14 @@ def save_track_data():
             f.write(f"        ({x}, {y}),\n")
         f.write("    ],\n")
 
-        f.write(f'    "drs_zone": {drs_list},\n')
+        f.write(f'    "drs_zones": {drs_zones},\n')
 
         f.write('    "pit_lane": [\n')
         for x, y in relative_pit_lane:
             f.write(f"        ({x}, {y}),\n")
         f.write("    ],\n")
 
-        f.write(f'    "sectors": {sectors_list},\n')
+        f.write(f'    "sector_points": {sector_points},\n')
 
         f.write("}\n")
 
@@ -156,20 +152,18 @@ def draw_points(points, color, show_index=True, radius=5):
     for i, p in enumerate(points):
         pygame.draw.circle(screen, color, p, radius)
         if show_index:
-            label = small_font.render(str(i), True, (255, 255, 255))
+            label = small_font.render(str(i), True, TEXT_COLOR)
             screen.blit(label, (p[0] + 6, p[1] - 6))
 
 def draw_polyline(points, color, closed=False, width=3):
     if len(points) > 1:
         pygame.draw.lines(screen, color, closed, points, width)
 
-def draw_drs_zone():
+def draw_drs_zones():
     if len(racing_line) < 2:
         return
 
-    for zone in drs_zones:
-        start, end = zone
-
+    for start, end in drs_zones:
         if start >= len(racing_line) or end >= len(racing_line):
             continue
 
@@ -179,25 +173,30 @@ def draw_drs_zone():
         for i in range(a, min(b, len(racing_line) - 1)):
             pygame.draw.line(screen, DRS_COLOR, racing_line[i], racing_line[i + 1], 6)
 
+    # rozkliknutý začátek další DRS zóny
+    if current_drs_start is not None and 0 <= current_drs_start < len(racing_line):
+        pygame.draw.circle(screen, (255, 255, 255), racing_line[current_drs_start], 10, 2)
+
 def draw_sector_markers():
-    if sector1 is not None and 0 <= sector1 < len(racing_line):
-        pygame.draw.circle(screen, SECTOR_COLOR, racing_line[sector1], 10, 2)
-    if sector2 is not None and 0 <= sector2 < len(racing_line):
-        pygame.draw.circle(screen, SECTOR_COLOR, racing_line[sector2], 10, 2)
+    for idx in sector_points:
+        if 0 <= idx < len(racing_line):
+            pygame.draw.circle(screen, SECTOR_COLOR, racing_line[idx], 10, 2)
 
 def clear_current_mode():
-    global racing_line, pit_lane, drs_start, drs_end, sector1, sector2
+    global racing_line, pit_lane, drs_zones, current_drs_start, sector_points
 
     if mode == MODE_LINE:
         racing_line = []
+        drs_zones = []
+        current_drs_start = None
+        sector_points = []
     elif mode == MODE_PIT:
         pit_lane = []
     elif mode == MODE_DRS:
         drs_zones = []
         current_drs_start = None
     elif mode == MODE_SECTOR:
-        sector1 = None
-        sector2 = None
+        sector_points = []
 
 def draw_ui():
     info_lines = [
@@ -205,11 +204,12 @@ def draw_ui():
         "",
         "1 = Racing line mode",
         "2 = Pit lane mode",
-        "3 = DRS zone mode",
-        "4 = Sector mode",
+        "3 = DRS zones mode",
+        "4 = Sector points mode",
         "",
         "LMB = Add/select point",
         "Backspace = Remove last point",
+        "D = Remove last DRS zone",
         "C = Clear current mode",
         "U = Auto-close racing line",
         "G = Smooth racing line",
@@ -218,20 +218,23 @@ def draw_ui():
         "",
         f"Racing points: {len(racing_line)}",
         f"Pit points: {len(pit_lane)}",
-        f"DRS: {drs_start}, {drs_end}",
-        f"Sectors: {sector1}, {sector2}",
+        f"DRS zones: {drs_zones}",
+        f"Current DRS start: {current_drs_start}",
+        f"Sector points: {sector_points}",
+        "",
+        "Pozn.: 2 sektorové body = 3 sektory",
     ]
 
     panel_x = 20
     panel_y = 20
 
     for line in info_lines:
-        text = font.render(line, True, (255, 255, 255))
+        text = font.render(line, True, TEXT_COLOR)
         screen.blit(text, (panel_x, panel_y))
         panel_y += 30
 
 def handle_click(mouse_pos):
-    global drs_start, drs_end, sector1, sector2
+    global current_drs_start, drs_zones, sector_points
 
     if not track_rect.collidepoint(mouse_pos):
         return
@@ -243,8 +246,6 @@ def handle_click(mouse_pos):
         pit_lane.append(mouse_pos)
 
     elif mode == MODE_DRS:
-        global current_drs_start, drs_zones
-
         idx = find_nearest_point_index(mouse_pos, racing_line)
         if idx is not None:
             if current_drs_start is None:
@@ -256,13 +257,11 @@ def handle_click(mouse_pos):
     elif mode == MODE_SECTOR:
         idx = find_nearest_point_index(mouse_pos, racing_line)
         if idx is not None:
-            if sector1 is None:
-                sector1 = idx
-            elif sector2 is None:
-                sector2 = idx
+            if len(sector_points) < 2:
+                sector_points.append(idx)
+                sector_points.sort()
             else:
-                sector1 = idx
-                sector2 = None
+                sector_points = [idx]
 
 # =========================================================
 # MAIN LOOP
@@ -296,6 +295,12 @@ while running:
                     racing_line.pop()
                 elif mode == MODE_PIT and pit_lane:
                     pit_lane.pop()
+                elif mode == MODE_SECTOR and sector_points:
+                    sector_points.pop()
+
+            elif event.key == pygame.K_d:
+                if mode == MODE_DRS and drs_zones:
+                    drs_zones.pop()
 
             elif event.key == pygame.K_c:
                 clear_current_mode()
@@ -318,7 +323,7 @@ while running:
     screen.fill(BG_COLOR)
     screen.blit(track_image, track_rect.topleft)
 
-    draw_drs_zone()
+    draw_drs_zones()
     draw_polyline(racing_line, LINE_COLOR, closed=False, width=3)
     draw_points(racing_line, POINT_COLOR, show_index=True, radius=4)
 

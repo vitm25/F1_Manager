@@ -362,7 +362,9 @@ class RaceScreen(Screen):
         self.track_length = self.track["length"]
         self.race_laps = self.track["laps"]
 
-        self.championship_points = {}
+        self.drs_zones = self.track["drs_zones"]
+        self.pit_lane = self.track["pit_lane"]
+        self.sector_points = self.track["sector_points"]
 
         self.track_display_width = 600
         self.track_display_height = 400
@@ -370,9 +372,9 @@ class RaceScreen(Screen):
         self.track_offset_x = 50
         self.track_offset_y = 150
 
-        # původní velikost, na které jsi klikával body v editoru
-        self.track_source_width = 1080
-        self.track_source_height = 1080
+        # editor ukládá body relativně k obrázku 1000x1000
+        self.track_source_width = 1000
+        self.track_source_height = 1000
 
         self.scale_x = self.track_display_width / self.track_source_width
         self.scale_y = self.track_display_height / self.track_source_height
@@ -423,14 +425,33 @@ class RaceScreen(Screen):
                 self.championship_points[driver.name] += pts
 
         self.current_track_index += 1
-        
+
         if self.current_track_index >= len(self.tracks):
             self.current_track_index = 0
-            
+
         self.track = self.tracks[self.current_track_index]
         self.track_map = self.track["racing_line"]
         self.track_length = self.track["length"]
         self.race_laps = self.track["laps"]
+
+        self.drs_zones = self.track["drs_zones"]
+        self.pit_lane = self.track["pit_lane"]
+        self.sector_points = self.track["sector_points"]
+
+        self.track_image = pygame.image.load(self.track["map"])
+        self.track_image = pygame.transform.scale(
+            self.track_image,
+            (self.track_display_width, self.track_display_height)
+        )
+
+        for driver in self.drivers:
+            driver.track_index = 0
+            driver.progress = 0
+            driver.current_lap = 0
+            driver.finished = False
+            driver.in_pit = False
+            driver.pit_timer = 0.0
+            driver.tire_wear = 0.0
         
     # updaty
     def update(self, delta_time):
@@ -713,20 +734,42 @@ class RaceScreen(Screen):
         screen.blit(self.track_image, (self.track_offset_x, self.track_offset_y))
 
         path = self.track_map
-        drs_zone_start = 4
-        drs_zone_end = 7
+        drs_zones = self.drs_zones
 
-        # DRS zone drawing
-        for i in range(drs_zone_start, min(drs_zone_end, len(path) - 1)):
-            x1, y1 = path[i]
-            x2, y2 = path[i + 1]
+        # DRS zones
+        for start, end in self.drs_zones:
+            a = min(start, end)
+            b = max(start, end)
 
-            x1 = x1 * self.scale_x + self.track_offset_x
-            y1 = y1 * self.scale_y + self.track_offset_y
-            x2 = x2 * self.scale_x + self.track_offset_x
-            y2 = y2 * self.scale_y + self.track_offset_y
+            for i in range(a, min(b, len(path) - 1)):
+                x1, y1 = path[i]
+                x2, y2 = path[i + 1]
 
-            pygame.draw.line(screen, (0, 200, 255), (x1, y1), (x2, y2), 4)
+                x1 = x1 * self.scale_x + self.track_offset_x
+                y1 = y1 * self.scale_y + self.track_offset_y
+                x2 = x2 * self.scale_x + self.track_offset_x
+                y2 = y2 * self.scale_y + self.track_offset_y
+
+                pygame.draw.line(screen, (0, 200, 255), (x1, y1), (x2, y2), 4)
+
+        # pit lane
+        if len(self.pit_lane) > 1:
+            scaled_pit = []
+            for px, py in self.pit_lane:
+                sx = px * self.scale_x + self.track_offset_x
+                sy = py * self.scale_y + self.track_offset_y
+                scaled_pit.append((sx, sy))
+
+            pygame.draw.lines(screen, (255, 140, 0), False, scaled_pit, 3)
+
+        # sector points
+        for sector_index in self.sector_points:
+            if 0 <= sector_index < len(path):
+                sx, sy = path[sector_index]
+                sx = sx * self.scale_x + self.track_offset_x
+                sy = sy * self.scale_y + self.track_offset_y
+
+                pygame.draw.circle(screen, (255, 255, 0), (int(sx), int(sy)), 10, 2)
 
         # debug racing line points
         for p in path:
@@ -750,7 +793,6 @@ class RaceScreen(Screen):
             x1, y1 = path[i]
             x2, y2 = path[next_i]
 
-            # scale to displayed track size
             x1 = x1 * self.scale_x
             y1 = y1 * self.scale_y
             x2 = x2 * self.scale_x
@@ -763,7 +805,13 @@ class RaceScreen(Screen):
             dy = y2 - y1
             driver.angle = math.degrees(math.atan2(dy, dx))
 
-            driver.drs_active = drs_zone_start <= driver.track_index <= drs_zone_end
+            driver.drs_active = False
+            for start, end in self.drs_zones:
+                a = min(start, end)
+                b = max(start, end)
+                if a <= driver.track_index <= b:
+                    driver.drs_active = True
+                    break
 
             color = colors[idx % len(colors)]
             if driver == self.selected_driver:
