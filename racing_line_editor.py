@@ -17,8 +17,8 @@ small_font = pygame.font.SysFont("arial", 18)
 # =========================================================
 # NASTAVENÍ
 # =========================================================
-TRACK_IMAGE_PATH = "tracks/belgium.png"
-OUTPUT_FILE = "racing_lines/belgium.py"
+TRACK_IMAGE_PATH = "tracks/usavegas.png"
+OUTPUT_FILE = "racing_lines/las_vegas.py"
 
 DISPLAY_WIDTH = 1000
 DISPLAY_HEIGHT = 1000
