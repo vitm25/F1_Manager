@@ -487,9 +487,13 @@ class RaceScreen(Screen):
                 print("SAFETY CAR IN THIS LAP")
 
         # progress závodu
-        race_progress = max(d.current_lap for d in self.drivers) / self.race_laps if self.race_laps > 0 else 0
+        if len(self.drivers) > 0 and self.race_laps > 0:
+            race_progress = max(d.current_lap for d in self.drivers) / self.race_laps
+        else:
+            race_progress = 0
 
         path = self.track_map
+        path_len = len(path)
 
         for driver in self.drivers:
             if driver.finished:
@@ -527,7 +531,7 @@ class RaceScreen(Screen):
 
             # racing line movement
             i = driver.track_index
-            next_i = (i + 1) % len(path)
+            next_i = (i + 1) % path_len
 
             x1, y1 = path[i]
             x2, y2 = path[next_i]
@@ -550,15 +554,23 @@ class RaceScreen(Screen):
                 driver.progress -= 1
                 driver.track_index += 1
 
-                if driver.track_index >= len(path):
+                if driver.track_index >= path_len:
                     driver.track_index = 0
                     driver.current_lap += 1
-                    driver.total_time = self.race_time
 
                     if driver.current_lap >= self.race_laps:
                         driver.finished = True
+                        driver.total_time = self.race_time
 
-        self.handle_battles()  
+            # virtuální vzdálenost pro pořadí a battles
+            driver.distance = driver.current_lap * path_len + driver.track_index + driver.progress
+
+        # battles + pořadí
+        self.handle_battles()
+
+        # když všichni dojeli -> další závod / finish race
+        if all(driver.finished for driver in self.drivers):
+            self.finish_race()  
 
     def handle_battles(self):
         
@@ -588,6 +600,7 @@ class RaceScreen(Screen):
                     print(front.name, front.distance, "|", behind.name, behind.distance)
                     
         self.update_drs()
+        
     # eventy                
     def handle_events(self, events):
         for event in events:
