@@ -291,16 +291,22 @@ def ai_choose_pace(driver, race_progress, current_weather):
     # konec závodu
     return "PUSH"
 
-def calculate_gaps(drivers):
-    results = sorted(drivers, key=lambda d: d.total_time)
+def calculate_gaps(drivers, track_length):
     
-    leader_time = results[0].total_time
-    
+    # vypočítáme pozici na trati
+    for d in drivers:
+        d.position_score = d.current_lap * track_length + d.track_index + d.progress
+
+    # seřadíme podle pozice
+    results = sorted(drivers, key=lambda d: d.position_score, reverse=True)
+
+    leader_score = results[0].position_score
+
     gaps = []
     for d in results:
-        gap = d.total_time - leader_time
+        gap = leader_score - d.position_score
         gaps.append((d, gap))
-        
+
     return gaps
 
                                      # screen classy
@@ -384,6 +390,7 @@ class RaceScreen(Screen):
             self.track_image,
             (self.track_display_width, self.track_display_height)
         )
+        self.position_score = 0.0
 
         print(self.track)
         
@@ -573,33 +580,45 @@ class RaceScreen(Screen):
             self.finish_race()  
 
     def handle_battles(self):
-        
-        # seřadíme podle vzdálenosti
-        self.drivers.sort(key=lambda d: (d.current_lap, d.distance), reverse=True)
-        
-        for i in range(len(self.drivers) - 1):
-            
-            front = self.drivers[i]
-            behind = self.drivers[i + 1]
-            
-            gap = front.distance - behind.distance
-            
-            # pokud jsou blízko > boj
-            if gap < 5:
-                
+        path_len = len(self.track_map)
+
+        # seřadíme podle skutečné pozice na trati
+        ordered = sorted(
+            self.drivers,
+            key=lambda d: d.current_lap * path_len + d.track_index + d.progress,
+            reverse=True
+        )
+
+        for i in range(len(ordered) - 1):
+            front = ordered[i]
+            behind = ordered[i + 1]
+
+            front_pos = front.current_lap * path_len + front.track_index + front.progress
+            behind_pos = behind.current_lap * path_len + behind.track_index + behind.progress
+
+            gap = front_pos - behind_pos
+
+            # pokud jsou blízko, může dojít k souboji
+            if 0 < gap < 0.8:
                 front_speed = get_speed(front, self)
                 behind_speed = get_speed(behind, self)
-                
+
                 attack_chance = 0.02 * behind.overtake_skill
-                
+
+                if behind.drs_active:
+                    attack_chance *= 1.5
+
                 if behind_speed > front_speed and random.random() < attack_chance:
-                    
-                    # předjetí
-                    self.drivers[i], self.drivers[i+1] = behind, front
-                    
-                    print(front.name, front.distance, "|", behind.name, behind.distance)
-                    
-        self.update_drs()
+                    # skutečné "předjetí" = posuneme behind lehce před front
+                    behind.track_index = front.track_index
+                    behind.progress = min(front.progress + 0.05, 0.99)
+
+                    # když progress přeteče, posuň index
+                    if behind.progress >= 1:
+                        behind.progress -= 1
+                        behind.track_index = (behind.track_index + 1) % path_len
+
+                    print(f"{behind.name} overtook {front.name}")
         
     # eventy                
     def handle_events(self, events):
@@ -674,7 +693,7 @@ class RaceScreen(Screen):
         # leaderboard
         y = 180
         self.driver_rects = []
-        results = calculate_gaps(self.drivers)
+        results = calculate_gaps(self.drivers, len(self.track_map))
 
         for i, (driver, gap) in enumerate(results):
             rect = pygame.Rect(20, y, 400, 35)
