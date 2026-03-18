@@ -3,6 +3,7 @@ import math
 import sys
 import random
 from tracks_data import tracks
+from championship_data import TEAMS, DRIVER_BASE_TIMES, CALENDAR_2025
 pygame.init() # spusteni knihovny
 
 WIDTH = 1920
@@ -69,9 +70,24 @@ track_map = [
 (500,500),
 (350,420),
 ]
-class Driver: # jezdec
-    def __init__(self, name, base_lap_time, tire):
+
+class Team:
+    def __init__(self, name, drivers, color):
         self.name = name
+        self.drivers = drivers  # seznam Driver objektů
+        self.color = color
+        self.points = 0
+    
+    def get_total_points(self):
+        return sum(d.points for d in self.drivers)
+    
+    def update_points(self):
+        self.points = self.get_total_points()
+
+class Driver: # jezdec
+    def __init__(self, name, base_lap_time, tire, team_name=None):
+        self.name = name
+        self.team_name = team_name
         self.base_lap_time = base_lap_time
         
         self.tire = tire
@@ -91,6 +107,7 @@ class Driver: # jezdec
         self.pit_error = False
         
         self.points = 0
+        self.race_points = 0  # body z jednoho závodu
         
         self.pace_mode = "NEUTRAL"
         self.ai_decision_timer = 0.0
@@ -106,7 +123,7 @@ class Driver: # jezdec
         self.angle = 0
 
         self.finished = False
-        
+
 # výpočet akt. rychlosti
 def get_speed(driver, race):
     
@@ -312,145 +329,163 @@ def calculate_gaps(drivers, track_length):
                                      # screen classy
 # závod/ championship
 
-class RaceScreen(Screen):
+class ChampionshipScreen(Screen):
     def __init__(self):
-        self.font = pygame.font.SysFont("arial", 22)
+        self.font = pygame.font.SysFont("arial", 20)
+        self.font_big = pygame.font.SysFont("arial", 28)
+        self.font_small = pygame.font.SysFont("arial", 16)
+        
+        # Track display NASTAVIT HNED NA ZAČÁTKU!
+        self.track_display_width = 600
+        self.track_display_height = 400
+        self.track_offset_x = 50
+        self.track_offset_y = 150
+        self.track_source_width = 1000
+        self.track_source_height = 1000
+        self.scale_x = self.track_display_width / self.track_source_width
+        self.scale_y = self.track_display_height / self.track_source_height
+        
+        self.track_image = None
+        self.driver_rects = []
+        
+        # Championship state
+        self.current_race_index = 0
+        self.championship_round = 0
+        
+        self.teams = {}
+        self.drivers = []
+        self.current_track = None
+        
+        self._initialize_championship()
+        self._load_race()  # TEĎ TO BUDE FUNGOVAT
+        
+        # Race state
         self.race_time = 0.0
-
-        # počasí
         self.current_weather = "SUN"
         self.weather_timer = 0.0
-
-        # safety car / VSC / red flag
+        
         self.safety_car_active = False
         self.safety_car_timer = 0.0
-
+        
         self.vsc_active = False
         self.vsc_timer = 0.0
-
+        
         self.red_flag_active = False
         self.red_flag_timer = 0.0
-
-        # jezdci
-        self.drivers = [
-            Driver("Driver A", 3.0, "SOFT"),
-            Driver("Driver B", 3.1, "MEDIUM"),
-            Driver("Driver C", 3.0, "SOFT"),
-        ]
-        self.selected_driver = self.drivers[0]
-
-        # ovládání času
+        
+        self.selected_driver = None
+        
+        # Time control
         self.time_scale = 1
         self.time_modes = [1, 2, 4, 20]
         self.time_index = 0
         self.paused = False
-
-        # tlačítka na ovládání rychlosti
+        
+        # Buttons
         self.speed_buttons = [
             {"text": "1x", "rect": pygame.Rect(720, 500, 60, 40), "speed": 1},
             {"text": "2x", "rect": pygame.Rect(790, 500, 60, 40), "speed": 2},
             {"text": "4x", "rect": pygame.Rect(860, 500, 60, 40), "speed": 4},
             {"text": "20x", "rect": pygame.Rect(930, 500, 60, 40), "speed": 20},
         ]
-
-        # debug auto
-        self.car_x = 300
-        self.car_y = 300
-        self.angle = 0
-        self.speed = 2
-
-        # tratě
-        self.current_track_index = 0
-        self.tracks = tracks
-        self.track = self.tracks[self.current_track_index]
-
-        self.track_map = self.track["racing_line"]
-        self.track_length = self.track["length"]
-        self.race_laps = self.track["laps"]
-
-        self.drs_zones = self.track["drs_zones"]
-        self.pit_lane = self.track["pit_lane"]
-        self.sector_points = self.track["sector_points"]
-
-        self.track_display_width = 600
-        self.track_display_height = 400
-
-        self.track_offset_x = 50
-        self.track_offset_y = 150
-
-        # editor ukládá body relativně k obrázku 1000x1000
-        self.track_source_width = 1000
-        self.track_source_height = 1000
-
-        self.scale_x = self.track_display_width / self.track_source_width
-        self.scale_y = self.track_display_height / self.track_source_height
-
-        self.track_image = pygame.image.load(self.track["map"])
-        self.track_image = pygame.transform.scale(
-            self.track_image,
-            (self.track_display_width, self.track_display_height)
-        )
-        self.position_score = 0.0
-
-        print(self.track)
         
-    def update_drs(self):
-    
-        #seřazení podle pozice na trari
-        ordered = sorted(self.drivers, key=lambda d: (d.current_lap, d.distance), reverse=True)
+        # UI elements
+        self.pit_button = None
+        self.push_button = None
+        self.neutral_button = None
+        self.save_button = None
+        self.next_race_button = None
         
-        for i, driver in enumerate(ordered):
-            
-            driver.drs_active = False
-            
-            # leader nemá drs
-            if i == 0:
-                continue
-            
-            front = ordered[i - 1]
+        self.race_finished = False
     
-            gap = front.distance - driver.distance
+    def _initialize_championship(self):
+        """Inicializuje všechny týmy a jezdce"""
+        self.teams = {}
+        self.drivers = []
+        
+        for team_name, team_data in TEAMS.items():
+            team_drivers = []
             
-            # DRS podmínky
-            if (
-                gap < 25 # vzdálenost
-                and self.current_weather != "RAIN"
-                and self.race_time > 5 # start závodu
-            ):
-                driver.drs_active = True 
-
-    def finish_race(self):
-
-        for pos, driver in enumerate(self.drivers):
-
-            if pos < 10:
-                pts = POINTS[pos]
-
-                if driver.name not in self.championship_points:
-                    self.championship_points[driver.name] = 0
-
-                self.championship_points[driver.name] += pts
-
-        self.current_track_index += 1
-
-        if self.current_track_index >= len(self.tracks):
-            self.current_track_index = 0
-
-        self.track = self.tracks[self.current_track_index]
-        self.track_map = self.track["racing_line"]
-        self.track_length = self.track["length"]
-        self.race_laps = self.track["laps"]
-
-        self.drs_zones = self.track["drs_zones"]
-        self.pit_lane = self.track["pit_lane"]
-        self.sector_points = self.track["sector_points"]
-
-        self.track_image = pygame.image.load(self.track["map"])
-        self.track_image = pygame.transform.scale(
-            self.track_image,
-            (self.track_display_width, self.track_display_height)
-        )
-
+            for driver_name in team_data["drivers"]:
+                base_time = DRIVER_BASE_TIMES.get(driver_name, 1.85)
+                driver = Driver(driver_name, base_time, "SOFT", team_name)
+                team_drivers.append(driver)
+                self.drivers.append(driver)
+            
+            team = Team(team_name, team_drivers, team_data["color"])
+            self.teams[team_name] = team
+        
+        self.selected_driver = self.drivers[0]
+    
+    def _load_race(self):
+        """Load current race from tracks"""
+        if self.current_race_index >= len(CALENDAR_2025):
+            print("🏆 Sezóna skončila!")
+            return
+        
+        calendar_entry = CALENDAR_2025[self.current_race_index]
+        race_name = calendar_entry["name"]
+        
+        # Mapping kalendáře na trati (podle tvých dat)
+        track_mapping = {
+            "Australian GP": "Australia",
+            "Chinese GP": "China",
+            "Japanese GP": "Japan",
+            "Bahrain GP": "Bahrain",
+            "Saudi Arabian GP": "Saudi Arabia",
+            "Miami GP": "Miami",
+            "Emilia Romagna GP": "Imola",
+            "Monaco GP": "Monaco",
+            "Spanish GP": "Spain",
+            "Canadian GP": "Canada",
+            "Austrian GP": "Austria",
+            "British GP": "Silverstone",
+            "Belgian GP": "Belgium",
+            "Hungarian GP": "Hungary",
+            "Dutch GP": "Netherlands",
+            "Italian GP": "Monza",
+            "Azerbaijan GP": "Azerbaijan",
+            "Singapore GP": "Singapore",
+            "United States GP": "USA",
+            "Mexico City GP": "Mexico",
+            "São Paulo GP": "Brazil",
+            "Las Vegas GP": "Las Vegas",
+            "Qatar GP": "Qatar",
+            "Abu Dhabi GP": "Abu Dhabi",
+        }
+        
+        track_name = track_mapping.get(race_name, None)
+        
+        # Hledej správnou trať
+        found_track = None
+        if track_name:
+            for track in tracks:
+                if track["name"] == track_name:
+                    found_track = track
+                    break
+        
+        if not found_track and len(tracks) > 0:
+            # Fallback
+            found_track = tracks[self.current_race_index % len(tracks)]
+            print(f"⚠️ Trať nenalezena: {race_name}, používám: {found_track['name']}")
+        
+        self.current_track = found_track
+        
+        if not self.current_track:
+            print("❌ CHYBA: Žádné tratě nejsou dostupné!")
+            return
+        
+        try:
+            self.track_image = pygame.image.load(self.current_track["map"])
+            self.track_image = pygame.transform.scale(
+                self.track_image,
+                (self.track_display_width, self.track_display_height)
+            )
+        except Exception as e:
+            print(f"⚠️ Nelze načíst obrázek trati: {self.current_track['map']}")
+            print(f"   Chyba: {e}")
+        
+        # Reset drivers
         for driver in self.drivers:
             driver.track_index = 0
             driver.progress = 0
@@ -459,20 +494,110 @@ class RaceScreen(Screen):
             driver.in_pit = False
             driver.pit_timer = 0.0
             driver.tire_wear = 0.0
+            driver.race_points = 0
+            driver.total_time = 0.0
         
-    # updaty
-    def update(self, delta_time):
-        if self.paused:
+        self.race_time = 0.0
+        self.race_finished = False
+        self.championship_round += 1
+        print(f"\n🏁 Kolo {self.championship_round}/{len(CALENDAR_2025)}: {self.current_track['name']}")
+    
+    def finish_race(self):
+        """Ukončí závod a přidělí body"""
+        if self.race_finished:
             return
-
+        
+        self.race_finished = True
+        
+        # Seřadíme podle času
+        results = sorted(self.drivers, key=lambda d: d.total_time)
+        
+        for i, driver in enumerate(results[:10]):
+            points = POINTS[i]
+            driver.race_points = points
+            driver.points += points
+            print(f"✓ {i+1}. {driver.name} ({driver.team_name}): +{points} bodů")
+        
+        # Update týmů
+        for team in self.teams.values():
+            team.update_points()
+    
+    def next_race(self):
+        """Přejde na další závod"""
+        self.current_race_index += 1
+        
+        if self.current_race_index >= len(CALENDAR_2025):
+            print("🏆 Sezóna skončila!")
+            return False
+        
+        self._load_race()
+        return True
+    
+    def handle_events(self, events):
+        for event in events:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    change_screen(GAME_STATE_MENU)
+                
+                if event.key == pygame.K_TAB:
+                    self.time_index += 1
+                    if self.time_index >= len(self.time_modes):
+                        self.time_index = 0
+                    self.time_scale = self.time_modes[self.time_index]
+                    print("Čas:", self.time_scale, "x")
+                
+                if event.key == pygame.K_SPACE:
+                    self.paused = not self.paused
+            
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                
+                # Výběr jezdce
+                for rect, driver in self.driver_rects:
+                    if rect.collidepoint(mouse_pos):
+                        self.selected_driver = driver
+                        print("Vybrán:", driver.name)
+                
+                # Pit button
+                if self.pit_button and self.pit_button.collidepoint(mouse_pos):
+                    if self.selected_driver:
+                        self.selected_driver.in_pit = True
+                        self.selected_driver.pit_timer = 0
+                        print(self.selected_driver.name, "BOX BOX")
+                
+                # Pace buttons
+                if self.push_button and self.push_button.collidepoint(mouse_pos):
+                    if self.selected_driver:
+                        self.selected_driver.pace_mode = "PUSH"
+                
+                if self.neutral_button and self.neutral_button.collidepoint(mouse_pos):
+                    if self.selected_driver:
+                        self.selected_driver.pace_mode = "NEUTRAL"
+                
+                if self.save_button and self.save_button.collidepoint(mouse_pos):
+                    if self.selected_driver:
+                        self.selected_driver.pace_mode = "SAVE"
+                
+                # Next race button
+                if self.race_finished and self.next_race_button and self.next_race_button.collidepoint(mouse_pos):
+                    self.next_race()
+                
+                # Speed buttons
+                for button in self.speed_buttons:
+                    if button["rect"].collidepoint(mouse_pos):
+                        self.time_scale = button["speed"]
+    
+    def update(self, delta_time):
+        if self.paused or not self.current_track:
+            return
+        
         delta_time *= self.time_scale
         self.race_time += delta_time
-
-        # počasí
+        
+        # Počasí
         self.weather_timer += delta_time
-        if self.weather_timer > 12:
+        if self.weather_timer > WEATHER_CHANGE_TIME:
             self.weather_timer = 0
-
             roll = random.random()
             if roll < 0.6:
                 self.current_weather = "SUN"
@@ -480,396 +605,356 @@ class RaceScreen(Screen):
                 self.current_weather = "CLOUD"
             else:
                 self.current_weather = "RAIN"
-
-        # safety car
+        
+        # Safety car
         if random.random() < 0.0005 and not self.safety_car_active:
             self.safety_car_active = True
             self.safety_car_timer = SAFETY_CAR_DURATION
-            print("SAFETY CAR DEPLOYED")
-
+            print("🚗 SAFETY CAR NASAZEN")
+        
         if self.safety_car_active:
             self.safety_car_timer -= delta_time
             if self.safety_car_timer <= 0:
                 self.safety_car_active = False
-                print("SAFETY CAR IN THIS LAP")
-
-        # progress závodu
-        if len(self.drivers) > 0 and self.race_laps > 0:
-            race_progress = max(d.current_lap for d in self.drivers) / self.race_laps
-        else:
-            race_progress = 0
-
-        path = self.track_map
+                print("✓ Safety car skončil")
+        
+        # Progress závodu
+        race_progress = max((d.current_lap for d in self.drivers if not d.finished), default=0) / self.current_track["laps"]
+        
+        path = self.current_track["racing_line"]
         path_len = len(path)
-
+        
         for driver in self.drivers:
             if driver.finished:
                 continue
-
+            
             driver.ai_decision_timer += delta_time
-
+            
             # AI pace
             if driver != self.selected_driver and driver.ai_decision_timer > 2:
                 driver.pace_mode = ai_choose_pace(driver, race_progress, self.current_weather)
                 driver.ai_decision_timer = 0
-
-            # AI pit stop
+            
+            # AI pit
             if driver != self.selected_driver:
                 if ai_should_pit(driver, self):
                     driver.in_pit = True
                     driver.pit_timer = 0
                     driver.last_pit_lap = driver.current_lap
                     driver.tire = ai_choose_tire(driver, self.current_weather)
-                    print(driver.name, "AI PIT STOP")
-
-            # pit stop timer
+                    print(f"🔧 {driver.name} - PIT STOP")
+            
+            # Pit stop timer
             if driver.in_pit:
                 driver.pit_timer += delta_time
                 if driver.pit_timer >= PIT_TIME:
                     driver.in_pit = False
                     driver.tire_wear = 0.0
-                    driver.tire = random.choice(["SOFT", "MEDIUM", "HARD"])
                 continue
-
-            # opotřebení pneumatik
+            
+            # Tire wear
             pace = PACE[driver.pace_mode]
             driver.tire_wear += delta_time * 0.02 * pace["wear"]
             driver.tire_wear = min(driver.tire_wear, 1.0)
-
-            # racing line movement
+            
+            # Racing line movement
             i = driver.track_index
             next_i = (i + 1) % path_len
-
+            
             x1, y1 = path[i]
             x2, y2 = path[next_i]
-
+            
             segment_length = math.hypot(x2 - x1, y2 - y1)
-
-            # základ rychlosti auta
+            
             base_speed = get_speed(driver, self) * 220.0
-
-            # pace mode ovlivní rychlost
+            
             if driver.pace_mode == "PUSH":
                 base_speed *= 1.08
             elif driver.pace_mode == "SAVE":
                 base_speed *= 0.90
-
+            
             if segment_length > 0:
                 driver.progress += (base_speed * delta_time) / segment_length
-
+            
             while driver.progress >= 1:
                 driver.progress -= 1
                 driver.track_index += 1
-
+                
                 if driver.track_index >= path_len:
                     driver.track_index = 0
                     driver.current_lap += 1
-
-                    if driver.current_lap >= self.race_laps:
+                    
+                    if driver.current_lap >= self.current_track["laps"]:
                         driver.finished = True
                         driver.total_time = self.race_time
-
-            # virtuální vzdálenost pro pořadí a battles
+            
             driver.distance = driver.current_lap * path_len + driver.track_index + driver.progress
-
-        # battles + pořadí
+        
+        # Battles
         self.handle_battles()
-
-        # když všichni dojeli -> další závod / finish race
+        
+        # DRS update
+        self.update_drs()
+        
+        # Když všichni skončí
         if all(driver.finished for driver in self.drivers):
-            self.finish_race()  
-
+            self.finish_race()
+    
+    def update_drs(self):
+        ordered = sorted(self.drivers, key=lambda d: (d.current_lap, d.distance), reverse=True)
+        
+        for i, driver in enumerate(ordered):
+            driver.drs_active = False
+            
+            if i == 0:
+                continue
+            
+            front = ordered[i - 1]
+            gap = front.distance - driver.distance
+            
+            if (gap < 25 and self.current_weather != "RAIN" and self.race_time > 5):
+                driver.drs_active = True
+    
     def handle_battles(self):
-        path_len = len(self.track_map)
-
-        # seřadíme podle skutečné pozice na trati
+        path_len = len(self.current_track["racing_line"])
+        
         ordered = sorted(
             self.drivers,
             key=lambda d: d.current_lap * path_len + d.track_index + d.progress,
             reverse=True
         )
-
+        
         for i in range(len(ordered) - 1):
             front = ordered[i]
             behind = ordered[i + 1]
-
+            
             front_pos = front.current_lap * path_len + front.track_index + front.progress
             behind_pos = behind.current_lap * path_len + behind.track_index + behind.progress
-
+            
             gap = front_pos - behind_pos
-
-            # pokud jsou blízko, může dojít k souboji
+            
             if 0 < gap < 0.8:
                 front_speed = get_speed(front, self)
                 behind_speed = get_speed(behind, self)
-
+                
                 attack_chance = 0.02 * behind.overtake_skill
-
+                
                 if behind.drs_active:
                     attack_chance *= 1.5
-
+                
                 if behind_speed > front_speed and random.random() < attack_chance:
-                    # skutečné "předjetí" = posuneme behind lehce před front
                     behind.track_index = front.track_index
                     behind.progress = min(front.progress + 0.05, 0.99)
-
-                    # když progress přeteče, posuň index
+                    
                     if behind.progress >= 1:
                         behind.progress -= 1
                         behind.track_index = (behind.track_index + 1) % path_len
-
-                    print(f"{behind.name} overtook {front.name}")
-        
-    # eventy                
-    def handle_events(self, events):
-        for event in events:
-            
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    change_screen(GAME_STATE_MENU)
                     
-                if event.key == pygame.K_TAB:
-                    self.time_index += 1
-                    if self.time_index >= len(self.time_modes):
-                        self.time_index = 0
-                        
-                    self.time_scale = self.time_modes[self.time_index]
-                    print("Time speed:", self.time_scale, "x")
-                    
-                if event.key == pygame.K_SPACE:
-                    self.paused = not self.paused
-            
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = pygame.mouse.get_pos()
-                
-                # výběr jezdce
-                for rect, driver in self.driver_rects:
-                    if rect.collidepoint(mouse_pos):
-                        self.selected_driver = driver
-                        print("Selected:", driver.name)
-                        
-                # pit button
-                if self.pit_button.collidepoint(mouse_pos):
-                    self.selected_driver.in_pit = True
-                    self.selected_driver.pit_timer = 0
-                    print(self.selected_driver.name, "BOX BOX")
-                    
-                # pace buttons
-                if self.push_button.collidepoint(mouse_pos):
-                    self.selected_driver.pace_mode = "PUSH"
-                    
-                if self.neutral_button.collidepoint(mouse_pos):
-                    self.selected_driver.pace_mode = "NEUTRAL"
-                    
-                if self.save_button.collidepoint(mouse_pos):
-                    self.selected_driver.pace_mode = "SAVE"
-                    
-                # tlačítka na čas
-                for button in self.speed_buttons:
-                    
-                    if button["rect"].collidepoint(mouse_pos):
-                        self.time_scale = button["speed"]
-    # kreslení
+                    print(f"⚡ {behind.name} předjel {front.name}")
+    
     def draw(self, screen):
         screen.fill((0, 100, 0))
-
-        # race info
-        time_text = self.font.render(f"Race time: {self.race_time:.1f}", True, (255, 255, 255))
+        
+        # Race info
+        time_text = self.font_big.render(f"Čas: {self.race_time:.1f}s", True, (255, 255, 255))
         screen.blit(time_text, (20, 20))
-
-        speed_text = self.font.render(f"Speed: {self.time_scale}x", True, (255, 255, 255))
-        screen.blit(speed_text, (20, 80))
-
-        weather_text = self.font.render(f"Weather: {self.current_weather}", True, (255, 255, 0))
-        screen.blit(weather_text, (20, 50))
-
+        
+        speed_text = self.font.render(f"Rychlost: {self.time_scale}x", True, (255, 255, 255))
+        screen.blit(speed_text, (20, 60))
+        
+        weather_text = self.font.render(f"Počasí: {self.current_weather}", True, (255, 255, 0))
+        screen.blit(weather_text, (20, 90))
+        
         if self.safety_car_active:
-            sc_text = self.font.render("SAFETY CAR", True, (255, 200, 0))
-            screen.blit(sc_text, (20, 110))
-
-        track_text = self.font.render(f"Track: {self.track['name']}", True, (255, 255, 255))
-        screen.blit(track_text, (20, 140))
-
-        # leaderboard
-        y = 180
+            sc_text = self.font.render("🚗 SAFETY CAR", True, (255, 200, 0))
+            screen.blit(sc_text, (20, 120))
+        
+        race_round = self.font.render(f"Kolo {self.championship_round}: {self.current_track['name']}", True, (255, 255, 255))
+        screen.blit(race_round, (20, 150))
+        
+        # Leaderboard
+        y = 200
         self.driver_rects = []
-        results = calculate_gaps(self.drivers, len(self.track_map))
-
-        for i, (driver, gap) in enumerate(results):
-            rect = pygame.Rect(20, y, 400, 35)
+        results = calculate_gaps(self.drivers, len(self.current_track["racing_line"]))
+        
+        for i, (driver, gap) in enumerate(results[:10]):
+            rect = pygame.Rect(20, y, 400, 30)
             self.driver_rects.append((rect, driver))
-
+            
             if driver == self.selected_driver:
                 pygame.draw.rect(screen, (80, 80, 80), rect)
-
+            
             if i == 0:
                 gap_text = "LEADER"
             else:
                 gap_text = f"+{gap:.1f}s"
-
-            color = (255, 255, 0) if i == 0 else (255, 255, 255)
-            drs = "DRS" if driver.drs_active else ""
-
+            
+            color = driver.teams[driver.team_name].color if driver.team_name in self.teams else (255, 255, 255)
+            drs = " DRS" if driver.drs_active else ""
+            
             text = self.font.render(
-                f"P{i+1} {driver.name} {drs} | {gap_text} | Lap {driver.current_lap}",
+                f"P{i+1} {driver.name} {drs} | {gap_text}",
                 True,
                 color
             )
-            screen.blit(text, (20, y))
-            y += 45
-
-        # paused
+            screen.blit(text, (25, y + 5))
+            y += 35
+        
+        # Paused
         if self.paused:
-            pause_text = self.font.render("PAUSED", True, (255, 0, 0))
+            pause_text = self.font_big.render("POZASTAVENO", True, (255, 0, 0))
             screen.blit(pause_text, (450, 50))
-
-        # manager panel
-        panel_x = 700
-        panel_rect = pygame.Rect(panel_x, 0, 300, 600)
-
-        pygame.draw.rect(screen, (30, 30, 30), panel_rect)
-        pygame.draw.line(screen, (80, 80, 80), (panel_x, 0), (panel_x, 600), 2)
-
-        selected = self.selected_driver
-
-        name_text = self.font.render(selected.name, True, (255, 255, 255))
-        screen.blit(name_text, (panel_x + 20, 40))
-
-        tire_text = self.font.render(f"Tire: {selected.tire}", True, (255, 255, 255))
-        screen.blit(tire_text, (panel_x + 20, 80))
-
-        wear_percent = int(selected.tire_wear * 100)
-        wear_text = self.font.render(f"Wear: {wear_percent}%", True, (255, 255, 255))
-        screen.blit(wear_text, (panel_x + 20, 120))
-
-        self.pit_button = pygame.Rect(panel_x + 20, 180, 200, 50)
-        pygame.draw.rect(screen, (200, 50, 50), self.pit_button)
-        pit_text = self.font.render("PIT STOP", True, (255, 255, 255))
-        screen.blit(pit_text, (panel_x + 45, 190))
-
-        pace_text = self.font.render(f"Pace: {selected.pace_mode}", True, (255, 255, 0))
-        screen.blit(pace_text, (panel_x + 20, 320))
-
-        self.push_button = pygame.Rect(panel_x + 20, 260, 80, 40)
-        self.neutral_button = pygame.Rect(panel_x + 110, 260, 80, 40)
-        self.save_button = pygame.Rect(panel_x + 200, 260, 80, 40)
-
-        pygame.draw.rect(screen, (200, 60, 60), self.push_button)
-        pygame.draw.rect(screen, (120, 120, 120), self.neutral_button)
-        pygame.draw.rect(screen, (60, 120, 200), self.save_button)
-
-        screen.blit(self.font.render("PUSH", True, (255, 255, 255)), (panel_x + 25, 265))
-        screen.blit(self.font.render("N", True, (255, 255, 255)), (panel_x + 135, 265))
-        screen.blit(self.font.render("SAVE", True, (255, 255, 255)), (panel_x + 205, 265))
-
-        # track image
-        screen.blit(self.track_image, (self.track_offset_x, self.track_offset_y))
-
-        path = self.track_map
-        drs_zones = self.drs_zones
-
-        # DRS zones
-        for start, end in self.drs_zones:
-            a = min(start, end)
-            b = max(start, end)
-
-            for i in range(a, min(b, len(path) - 1)):
-                x1, y1 = path[i]
-                x2, y2 = path[i + 1]
-
-                x1 = x1 * self.scale_x + self.track_offset_x
-                y1 = y1 * self.scale_y + self.track_offset_y
-                x2 = x2 * self.scale_x + self.track_offset_x
-                y2 = y2 * self.scale_y + self.track_offset_y
-
-                pygame.draw.line(screen, (0, 200, 255), (x1, y1), (x2, y2), 4)
-
-        # pit lane
-        if len(self.pit_lane) > 1:
-            scaled_pit = []
-            for px, py in self.pit_lane:
-                sx = px * self.scale_x + self.track_offset_x
-                sy = py * self.scale_y + self.track_offset_y
-                scaled_pit.append((sx, sy))
-
-            pygame.draw.lines(screen, (255, 140, 0), False, scaled_pit, 3)
-
-        # sector points
-        for sector_index in self.sector_points:
-            if 0 <= sector_index < len(path):
-                sx, sy = path[sector_index]
-                sx = sx * self.scale_x + self.track_offset_x
-                sy = sy * self.scale_y + self.track_offset_y
-
-                pygame.draw.circle(screen, (255, 255, 0), (int(sx), int(sy)), 10, 2)
-
-        # debug racing line points
-        for p in path:
-            px = int(p[0] * self.scale_x + self.track_offset_x)
-            py = int(p[1] * self.scale_y + self.track_offset_y)
-            pygame.draw.circle(screen, (0, 255, 255), (px, py), 4)
-
-        # cars on racing line
-        colors = [
-            (255, 0, 0),
-            (0, 255, 0),
-            (0, 150, 255),
-            (255, 200, 0),
-            (255, 0, 255),
-        ]
-
-        for idx, driver in enumerate(self.drivers):
-            i = driver.track_index
-            next_i = (i + 1) % len(path)
-
-            x1, y1 = path[i]
-            x2, y2 = path[next_i]
-
-            x1 = x1 * self.scale_x
-            y1 = y1 * self.scale_y
-            x2 = x2 * self.scale_x
-            y2 = y2 * self.scale_y
-
-            x = x1 + (x2 - x1) * driver.progress + self.track_offset_x
-            y = y1 + (y2 - y1) * driver.progress + self.track_offset_y
-
-            dx = x2 - x1
-            dy = y2 - y1
-            driver.angle = math.degrees(math.atan2(dy, dx))
-
-            driver.drs_active = False
-            for start, end in self.drs_zones:
+        
+        # Manager panel
+        if self.selected_driver:
+            panel_x = 700
+            panel_rect = pygame.Rect(panel_x, 0, 300, 500)
+            pygame.draw.rect(screen, (30, 30, 30), panel_rect)
+            pygame.draw.line(screen, (80, 80, 80), (panel_x, 0), (panel_x, 500), 2)
+            
+            selected = self.selected_driver
+            team_color = self.teams[selected.team_name].color
+            
+            name_text = self.font_big.render(f"{selected.name}", True, team_color)
+            screen.blit(name_text, (panel_x + 20, 40))
+            
+            team_text = self.font.render(f"Tým: {selected.team_name}", True, (200, 200, 200))
+            screen.blit(team_text, (panel_x + 20, 80))
+            
+            tire_text = self.font.render(f"Pneumatika: {selected.tire}", True, (255, 255, 255))
+            screen.blit(tire_text, (panel_x + 20, 120))
+            
+            wear_percent = int(selected.tire_wear * 100)
+            wear_text = self.font.render(f"Opotřebení: {wear_percent}%", True, (255, 100, 100) if wear_percent > 80 else (255, 255, 255))
+            screen.blit(wear_text, (panel_x + 20, 150))
+            
+            self.pit_button = pygame.Rect(panel_x + 20, 200, 150, 45)
+            pygame.draw.rect(screen, (200, 50, 50), self.pit_button)
+            pit_text = self.font.render("BOX BOX", True, (255, 255, 255))
+            screen.blit(pit_text, (panel_x + 40, 210))
+            
+            pace_text = self.font.render(f"Styl jízdy: {selected.pace_mode}", True, (255, 255, 0))
+            screen.blit(pace_text, (panel_x + 20, 290))
+            
+            self.push_button = pygame.Rect(panel_x + 20, 250, 70, 35)
+            self.neutral_button = pygame.Rect(panel_x + 95, 250, 70, 35)
+            self.save_button = pygame.Rect(panel_x + 170, 250, 70, 35)
+            
+            pygame.draw.rect(screen, (200, 60, 60), self.push_button)
+            pygame.draw.rect(screen, (120, 120, 120), self.neutral_button)
+            pygame.draw.rect(screen, (60, 120, 200), self.save_button)
+            
+            screen.blit(self.font.render("PUSH", True, (255, 255, 255)), (panel_x + 25, 255))
+            screen.blit(self.font.render("NEUTRAL", True, (255, 255, 255)), (panel_x + 100, 255))
+            screen.blit(self.font.render("SAVE", True, (255, 255, 255)), (panel_x + 172, 255))
+            
+            points_text = self.font.render(f"Body z závodu: {selected.race_points}", True, (255, 200, 0))
+            screen.blit(points_text, (panel_x + 20, 340))
+            
+            total_points_text = self.font.render(f"Celkem: {selected.points}", True, (255, 200, 0))
+            screen.blit(total_points_text, (panel_x + 20, 370))
+        
+        # Track display
+        if self.track_image:
+            screen.blit(self.track_image, (self.track_offset_x, self.track_offset_y))
+            
+            path = self.current_track["racing_line"]
+            
+            # DRS zones
+            for start, end in self.current_track["drs_zones"]:
                 a = min(start, end)
                 b = max(start, end)
-                if a <= driver.track_index <= b:
-                    driver.drs_active = True
-                    break
-
-            color = colors[idx % len(colors)]
-            if driver == self.selected_driver:
-                color = (255, 255, 255)
-
-            pygame.draw.circle(screen, color, (int(x), int(y)), 6)
-
-        # speed buttons
+                
+                for i in range(a, min(b, len(path) - 1)):
+                    x1, y1 = path[i]
+                    x2, y2 = path[i + 1]
+                    
+                    x1 = x1 * self.scale_x + self.track_offset_x
+                    y1 = y1 * self.scale_y + self.track_offset_y
+                    x2 = x2 * self.scale_x + self.track_offset_x
+                    y2 = y2 * self.scale_y + self.track_offset_y
+                    
+                    pygame.draw.line(screen, (0, 200, 255), (x1, y1), (x2, y2), 4)
+            
+            # Pit lane
+            if len(self.current_track["pit_lane"]) > 1:
+                scaled_pit = []
+                for px, py in self.current_track["pit_lane"]:
+                    sx = px * self.scale_x + self.track_offset_x
+                    sy = py * self.scale_y + self.track_offset_y
+                    scaled_pit.append((sx, sy))
+                
+                pygame.draw.lines(screen, (255, 140, 0), False, scaled_pit, 3)
+            
+            # Racing line
+            for p in path:
+                px = int(p[0] * self.scale_x + self.track_offset_x)
+                py = int(p[1] * self.scale_y + self.track_offset_y)
+                pygame.draw.circle(screen, (0, 255, 255), (px, py), 3)
+            
+            # Cars on track
+            for driver in self.drivers:
+                i = driver.track_index
+                next_i = (i + 1) % len(path)
+                
+                x1, y1 = path[i]
+                x2, y2 = path[next_i]
+                
+                x1 = x1 * self.scale_x
+                y1 = y1 * self.scale_y
+                x2 = x2 * self.scale_x
+                y2 = y2 * self.scale_y
+                
+                x = x1 + (x2 - x1) * driver.progress + self.track_offset_x
+                y = y1 + (y2 - y1) * driver.progress + self.track_offset_y
+                
+                dx = x2 - x1
+                dy = y2 - y1
+                driver.angle = math.degrees(math.atan2(dy, dx))
+                
+                color = self.teams[driver.team_name].color
+                if driver == self.selected_driver:
+                    pygame.draw.circle(screen, (255, 255, 255), (int(x), int(y)), 8)
+                
+                pygame.draw.circle(screen, color, (int(x), int(y)), 6)
+        
+        # Speed buttons
         for button in self.speed_buttons:
             color = (80, 80, 80)
             if button["speed"] == self.time_scale:
                 color = (200, 200, 0)
-
+            
             pygame.draw.rect(screen, color, button["rect"])
-
             text_cas = self.font.render(button["text"], True, (255, 255, 255))
             text_rect = text_cas.get_rect(center=button["rect"].center)
             screen.blit(text_cas, text_rect)
-
         
-        if self.safety_car_active:
-            sc_text = font.render("SAFETY CAR", True, (255,200,0))
-            screen.blit(sc_text, (20,110))
+        # Championship standings
+        y = 720
+        stand_title = self.font_big.render("CHAMPIONSHIP STANDINGS", True, (255, 255, 0))
+        screen.blit(stand_title, (1000, y))
+        y += 40
+        
+        standings = sorted(self.teams.values(), key=lambda t: t.points, reverse=True)
+        for i, team in enumerate(standings[:5]):
+            team_text = self.font.render(f"{i+1}. {team.name}: {team.points}pts", True, team.color)
+            screen.blit(team_text, (1000, y))
+            y += 30
+        
+        # Race finished
+        if self.race_finished:
+            finish_rect = pygame.Rect(600, 400, 700, 200)
+            pygame.draw.rect(screen, (30, 30, 30), finish_rect)
+            pygame.draw.rect(screen, (255, 255, 0), finish_rect, 3)
             
-        track_text = font.render(f"Track: {self.track['name']}", True, (255,255,255))
-        screen.blit(track_text, (20,140))
+            finish_text = self.font_big.render("ZÁVOD SKONČIL", True, (255, 200, 0))
+            screen.blit(finish_text, (750, 430))
+            
+            self.next_race_button = pygame.Rect(750, 490, 300, 60)
+            pygame.draw.rect(screen, (100, 200, 100), self.next_race_button)
+            next_text = self.font.render("Další závod (KLIKNI)", True, (255, 255, 255))
+            text_rect = next_text.get_rect(center=self.next_race_button.center)
+            screen.blit(next_text, text_rect)
 
 # trénink
 class PracticeScreen(Screen):
@@ -914,7 +999,7 @@ def change_screen(new_state):
         current_screen = MenuScreen()
         
     elif new_state == GAME_STATE_RACE:
-        current_screen = RaceScreen()
+        current_screen = ChampionshipScreen()
     
     elif new_state == GAME_STATE_PRACTICE:
         current_screen = PracticeScreen()
