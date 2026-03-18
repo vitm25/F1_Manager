@@ -789,7 +789,7 @@ class ChampionshipScreen(Screen):
             else:
                 gap_text = f"+{gap:.1f}s"
             
-            color = driver.teams[driver.team_name].color if driver.team_name in self.teams else (255, 255, 255)
+            color = color = self.teams[driver.team_name].color if driver.team_name in self.teams else (255, 255, 255)
             drs = " DRS" if driver.drs_active else ""
             
             text = self.font.render(
