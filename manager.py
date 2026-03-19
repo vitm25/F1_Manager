@@ -12,6 +12,8 @@ barvy_pozadi = (0, 0, 0,)
 FPS = 60
 RACE_ARE_WIDTH = 650
 
+pit_entry_index = 5
+
 race_finished = False
 points_awarded = False
 
@@ -121,8 +123,12 @@ class Driver: # jezdec
         self.track_index = 0
         self.progress = 0
         self.angle = 0
-
         self.finished = False
+
+        self.pit_requested = False
+        self.on_pit_lane = False
+        self.pit_lane_index = 0
+        self.pit_lane_progress = 0.0
 
 # výpočet akt. rychlosti
 def get_speed(driver, race):
@@ -491,8 +497,8 @@ class ChampionshipScreen(Screen):
             driver.progress = 0
             driver.current_lap = 0
             driver.finished = False
-            driver.in_pit = False
-            driver.pit_timer = 0.0
+            driver.pit_requested = True
+            driver.next_tire = ai_choose_tire(driver, self.current_weather)
             driver.tire_wear = 0.0
             driver.race_points = 0
             driver.total_time = 0.0
@@ -561,8 +567,8 @@ class ChampionshipScreen(Screen):
                 # Pit button
                 if self.pit_button and self.pit_button.collidepoint(mouse_pos):
                     if self.selected_driver:
-                        self.selected_driver.in_pit = True
-                        self.selected_driver.pit_timer = 0
+                        self.selected_driver.pit_requested = True
+                        self.selected_driver.next_tire = self.selected_driver.tire
                         print(self.selected_driver.name, "BOX BOX")
                 
                 # Pace buttons
@@ -637,19 +643,25 @@ class ChampionshipScreen(Screen):
             
             # AI pit
             if driver != self.selected_driver:
-                if ai_should_pit(driver, self):
-                    driver.in_pit = True
-                    driver.pit_timer = 0
+                if ai_should_pit(driver, self) and not driver.pit_requested and not driver.on_pit_lane and not driver.in_pit:
+                    driver.pit_requested = True
                     driver.last_pit_lap = driver.current_lap
-                    driver.tire = ai_choose_tire(driver, self.current_weather)
-                    print(f"🔧 {driver.name} - PIT STOP")
+                    driver.next_tire = ai_choose_tire(driver, self.current_weather)
+                    print(f"🔧 {driver.name} - BOX THIS LAP")
             
             # Pit stop timer
             if driver.in_pit:
+
                 driver.pit_timer += delta_time
                 if driver.pit_timer >= PIT_TIME:
                     driver.in_pit = False
                     driver.tire_wear = 0.0
+
+                    # po pit stopu vrať na trať
+                    driver.pit_requested = False
+                    driver.pit_lane_index = 0
+                    driver.pit_lane_progress = 0.0
+
                 continue
             
             # Tire wear
@@ -690,6 +702,42 @@ class ChampionshipScreen(Screen):
             
             driver.distance = driver.current_lap * path_len + driver.track_index + driver.progress
         
+        # PIT LANE LOGIKA
+        if driver.on_pit_lane:
+            pit_path = self.current_track["pit_lane"]
+
+            if len(pit_path) > 1:
+                i = driver.pit_lane_index
+                next_i = (i + 1) % len(pit_path)
+
+                x1, y1 = pit_path[i]
+                x2, y2 = pit_path[next_i]
+
+                segment_length = math.hypot(x2 - x1, y2 - y1)
+                pit_speed = get_speed(driver, self) * 140.0  # pomalejší než normální trať
+
+                if segment_length > 0:
+                    driver.pit_lane_progress += (pit_speed * delta_time) / segment_length
+
+                while driver.pit_lane_progress >= 1:
+                    driver.pit_lane_progress -= 1
+                    driver.pit_lane_index += 1
+
+                    # dojel do boxového stání
+                    if driver.pit_lane_index >= len(pit_path) - 1:
+                        driver.on_pit_lane = False
+                        driver.in_pit = True
+                        driver.pit_timer = 0.0
+
+            continue    
+
+        if driver.pit_requested and not driver.on_pit_lane and not driver.in_pit:
+            if abs(driver.track_index - pit_entry_index) <= 1:
+                driver.on_pit_lane = True
+                driver.pit_lane_index = 0
+                driver.pit_lane_progress = 0.0
+                continue
+
         # Battles
         self.handle_battles()
         
