@@ -6,6 +6,10 @@ from tracks_data import tracks
 from championship_data import TEAMS, DRIVER_BASE_TIMES, CALENDAR_2025
 pygame.init() # spusteni knihovny
 
+print("Dostupné tratě:")
+for track in tracks:
+    print(f"  - {track['name']}")
+
 WIDTH = 1920
 HEIGHT = 1080
 barvy_pozadi = (0, 0, 0,)
@@ -516,6 +520,10 @@ class ChampionshipScreen(Screen):
         self.race_finished = False
         self.championship_round += 1
         print(f"\n🏁 Kolo {self.championship_round}/{len(CALENDAR_2025)}: {self.current_track['name']}")
+
+        print(f"🏁 NAČTENA TRAŤ: {self.current_track['name']}")
+        print(f"   Mapa: {self.current_track['map']}")
+        print(f"   Obrázek existuje: {self.track_image is not None}")
     
     def finish_race(self):
         """Ukončí závod a přidělí body"""
@@ -602,67 +610,75 @@ class ChampionshipScreen(Screen):
                     if button["rect"].collidepoint(mouse_pos):
                         self.time_scale = button["speed"]
     
-    def __init__(self):
-        self.font = pygame.font.SysFont("arial", 20)
-        self.font_big = pygame.font.SysFont("arial", 28)
-        self.font_small = pygame.font.SysFont("arial", 16)
-        
-        # Track display
-        self.track_display_width = 600
-        self.track_display_height = 400
-        self.track_offset_x = 50
-        self.track_offset_y = 150
-        
-        self.track_image = None
-        self.driver_rects = []
-        
-        # Championship state
-        self.current_race_index = 0
-        self.championship_round = 0
-        
-        self.teams = {}
-        self.drivers = []
-        self.current_track = None
+    class ChampionshipScreen(Screen):
+        def __init__(self):
+            self.font = pygame.font.SysFont("arial", 20)
+            self.font_big = pygame.font.SysFont("arial", 28)
+            self.font_small = pygame.font.SysFont("arial", 16)
+            
+            # Track display - MUSÍ BÝT TADY!
+            self.track_display_width = 600
+            self.track_display_height = 400
+            self.track_offset_x = 50
+            self.track_offset_y = 150
+            self.track_source_width = 1000
+            self.track_source_height = 1000
+            
+            self.scale_x = self.track_display_width / self.track_source_width      # ⭐ DŮLEŽITÉ
+            self.scale_y = self.track_display_height / self.track_source_height    # ⭐ DŮLEŽITÉ
+            
+            self.track_image = None
+            self.driver_rects = []
+            
+            # Championship state
+            self.current_race_index = 0
+            self.championship_round = 0
+            
+            self.teams = {}
+            self.drivers = []
+            self.current_track = None
 
-        self._initialize_championship()
+            self._initialize_championship()
 
-        # Race state
-        self.race_time = 0.0
-        self.current_weather = "SUN"
-        self.weather_timer = 0.0
+            # Race state
+            self.race_time = 0.0
+            self.current_weather = "SUN"
+            self.weather_timer = 0.0
 
-        self.safety_car_active = False
-        self.safety_car_timer = 0.0
+            self.safety_car_active = False
+            self.safety_car_timer = 0.0
 
-        self.vsc_active = False
-        self.vsc_timer = 0.0
+            self.vsc_active = False
+            self.vsc_timer = 0.0
 
-        self.selected_driver = None
+            self.selected_driver = None
 
-        # Time control
-        self.time_scale = 1
-        self.time_modes = [1, 2, 4, 20]
-        self.time_index = 0
-        self.paused = False
+            # Time control
+            self.time_scale = 1
+            self.time_modes = [1, 2, 4, 20]
+            self.time_index = 0
+            self.paused = False
 
-        self._load_race()
-        
-        # Buttons
-        self.speed_buttons = [
-            {"text": "1x", "rect": pygame.Rect(720, 500, 60, 40), "speed": 1},
-            {"text": "2x", "rect": pygame.Rect(790, 500, 60, 40), "speed": 2},
-            {"text": "4x", "rect": pygame.Rect(860, 500, 60, 40), "speed": 4},
-            {"text": "20x", "rect": pygame.Rect(930, 500, 60, 40), "speed": 20},
-        ]
-        
-        self.pit_button = None
-        self.push_button = None
-        self.neutral_button = None
-        self.save_button = None
-        self.next_race_button = None
-        
-        self.race_finished = False
-        self.points_awarded = False
+            self._load_race()
+            
+            # Buttons
+            self.speed_buttons = [
+                {"text": "1x", "rect": pygame.Rect(720, 500, 60, 40), "speed": 1},
+                {"text": "2x", "rect": pygame.Rect(790, 500, 60, 40), "speed": 2},
+                {"text": "4x", "rect": pygame.Rect(860, 500, 60, 40), "speed": 4},
+                {"text": "20x", "rect": pygame.Rect(930, 500, 60, 40), "speed": 20},
+            ]
+            
+            self.pit_button = None
+            self.push_button = None
+            self.neutral_button = None
+            self.save_button = None
+            self.next_race_button = None
+            
+            self.race_finished = False
+            self.points_awarded = False
+    
+    # ZBYTEK TŘÍDY - _initialize_championship, _load_race, atd...
 
     def _initialize_championship(self):
         self.teams = {}
@@ -689,8 +705,31 @@ class ChampionshipScreen(Screen):
         calendar_entry = CALENDAR_2025[self.current_race_index]
         race_name = calendar_entry["name"]
         
-        track_mapping = {  # ... tvůj mapping zůstává stejný ...
-            # (nepisuji ho celý, nech ho jak máš)
+        track_mapping = {
+            "Australian GP": "Australia",
+            "Chinese GP": "China",
+            "Japanese GP": "Japan",
+            "Bahrain GP": "Bahrain",
+            "Saudi Arabian GP": "Saudi Arabia",
+            "Miami GP": "Miami",
+            "Emilia Romagna GP": "Imola",
+            "Monaco GP": "Monaco",
+            "Spanish GP": "Spain",
+            "Canadian GP": "Canada",
+            "Austrian GP": "Austria",
+            "British GP": "Silverstone",
+            "Belgian GP": "Belgium",
+            "Hungarian GP": "Hungary",
+            "Dutch GP": "Netherlands",
+            "Italian GP": "Monza",
+            "Azerbaijan GP": "Azerbaijan",
+            "Singapore GP": "Singapore",
+            "United States GP": "USA",
+            "Mexico City GP": "Mexico",
+            "São Paulo GP": "Brazil",
+            "Las Vegas GP": "Las Vegas",
+            "Qatar GP": "Qatar",
+            "Abu Dhabi GP": "Abu Dhabi",
         }
         
         track_name = track_mapping.get(race_name, None)
@@ -712,16 +751,23 @@ class ChampionshipScreen(Screen):
             print("CHYBA: Žádná trať nenalezena!")
             return
         
+        # RESETUJ MĚŘÍTKO! ⭐
+        self.scale_x = self.track_display_width / self.track_source_width
+        self.scale_y = self.track_display_height / self.track_source_height
+        
+        # NAČTI NOVÝ OBRÁZEK ⭐
         try:
             self.track_image = pygame.image.load(self.current_track["map"])
             self.track_image = pygame.transform.scale(
                 self.track_image,
                 (self.track_display_width, self.track_display_height)
             )
+            print(f"✓ Obrázek trati načten: {self.current_track['map']}")
         except Exception as e:
             print(f"Nelze načíst mapu: {e}")
+            self.track_image = None
         
-        # Reset jezdců – bez automatického pit requestu!
+        # Reset jezdců
         for driver in self.drivers:
             driver.track_index = 0
             driver.progress = 0.0
@@ -732,7 +778,7 @@ class ChampionshipScreen(Screen):
             driver.in_pit = False
             driver.pit_timer = 0.0
             driver.tire_wear = 0.0
-            driver.last_pit_lap = -10               # může pitovat brzy
+            driver.last_pit_lap = -10
             driver.next_tire = "MEDIUM"
             driver.tire = "MEDIUM"
             driver.total_time = 0.0
@@ -743,6 +789,7 @@ class ChampionshipScreen(Screen):
         self.race_finished = False
         self.points_awarded = False
         self.current_weather = "SUN"
+        self.weather_timer = 0.0
         self.safety_car_active = False
         
         self.championship_round += 1
