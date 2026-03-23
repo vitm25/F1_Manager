@@ -134,6 +134,21 @@ class Driver: # jezdec
         self.pit_lane_index = 0
         self.pit_lane_progress = 0.0
 
+                # === NOVÉ STRATEGIE ===
+        self.current_stint_laps = 0          # kolik kol už jel na těchto gumách
+        self.target_stint_end = 0            # na kterém kole plánuje pit
+        self.strategy_aggression = random.uniform(0.75, 1.35)  # <1 = konzervativní, >1 = agresivní
+        self.planned_stops = random.choice([1, 2])            # 1-stop nebo 2-stop
+        self.undercut_chance = 0.0
+
+                # === NOVÉ: PORUCHY A DNF ===
+        self.fuel = 1.0                     # 100 %
+        self.reliability = random.uniform(0.82, 0.98)   # jak spolehlivé auto
+        self.engine_damage = 0.0
+        self.is_dnf = False
+        self.dnf_reason = None              # "Engine", "Fuel", "Crash", "Spin"
+        self.incident_cooldown = 0
+
 # výpočet akt. rychlosti
 def get_speed(driver, race):
     
@@ -195,19 +210,19 @@ def ai_should_pit(driver, race):
 
 #Ai si vybíra kola
 def ai_choose_tire(driver, current_weather):
+    if current_weather in ["RAIN", "CLOUD"] and random.random() < 0.8:
+        return "INTER" if random.random() < 0.6 else "WET"
     
-    if current_weather == "RAIN":
-        if random.random() < 0.5:
-            return "INTER"
-        return "WET"
+    # Strategie podle počtu plánovaných zastávek
+    if driver.planned_stops == 1:
+        return "HARD" if driver.current_lap > 15 else "MEDIUM"
     
-    if driver.current_lap < 5:
+    if driver.current_lap < 8:
         return "SOFT"
-    
-    if driver.tire_wear > 0.8:
-        return "HARD"
-    
-    return "MEDIUM"
+    elif driver.current_lap < 25:
+        return "MEDIUM"
+    else:
+        return "HARD" if random.random() < 0.7 else "MEDIUM"
 
 # body z šampionát
 def award_championship_points(drivers):
@@ -318,6 +333,134 @@ def ai_choose_pace(driver, race_progress, current_weather):
     # konec závodu
     return "PUSH"
 
+# ==================== REÁLNÉ STINTY + UNDERCUT / OVERCUT ====================
+
+def ai_plan_stint(driver, race, is_first_stint=True):
+    """Nastaví cílovou délku stintu podle typu gum a strategie"""
+    tire = driver.tire
+    
+    base_stint = {
+        "SOFT":  random.randint(8,  11),
+        "MEDIUM":random.randint(12, 16),
+        "HARD":  random.randint(18, 24),
+        "INTER": random.randint(6,  10),
+        "WET":   random.randint(5,   9),
+    }[tire]
+
+    # Agrese + počasí
+    modifier = driver.strategy_aggression
+    if race.current_weather == "RAIN":
+        modifier *= 0.7
+    if driver.planned_stops == 1:          # 1-stop = delší stinty
+        modifier *= 1.25
+    
+    driver.target_stint_end = driver.current_lap + int(base_stint * modifier)
+    driver.current_stint_laps = 0
+    print(f"🧠 {driver.name} plánuje stint do kola {driver.target_stint_end} ({tire})")
+
+
+def ai_should_pit(driver, race):
+    """NOVÁ verze s undercut/overcut logikou"""
+    if driver.in_pit or driver.on_pit_lane:
+        return False
+    if driver.current_lap - driver.last_pit_lap < 6:   # minimální cooldown
+        return False
+
+    # Základní podmínky
+    if driver.tire_wear > 0.88:
+        return True
+    if race.current_weather == "RAIN" and driver.tire not in ["INTER", "WET"]:
+        return True
+    if race.current_weather == "SUN" and driver.tire in ["INTER", "WET"]:
+        return True
+
+    # === UNDERCUT / OVERCUT LOGIKA ===
+    driver.current_stint_laps += 1   # každé kolo +1
+
+    # Najdeme nejlepšího soupeře před ním
+    ahead = None
+    min_gap = 999
+    for d in race.drivers:
+        if d == driver: continue
+        gap = (d.current_lap * 100 + d.track_index + d.progress) - \
+              (driver.current_lap * 100 + driver.track_index + driver.progress)
+        if 0 < gap < min_gap:
+            min_gap = gap
+            ahead = d
+
+    # UNDERCUT (pitnu dříve než soupeř)
+    if ahead and ahead.current_stint_laps > 4 and driver.current_stint_laps >= 7:
+        if min_gap < 8 and random.random() < (0.65 * driver.strategy_aggression):
+            print(f"🔥 UNDERCUT! {driver.name} pituje před {ahead.name}")
+            driver.next_tire = ai_choose_tire(driver, race.current_weather)
+            return True
+
+    # OVERCUT (zůstanu déle)
+    if driver.current_stint_laps >= driver.target_stint_end - 3:
+        if random.random() < 0.4:                     # 40% šance na overcut
+            print(f"⏳ OVERCUT {driver.name} – prodlužuji stint")
+            driver.target_stint_end += 2
+            return False
+
+    # Normální pit podle plánu
+    if driver.current_stint_laps >= driver.target_stint_end:
+        driver.next_tire = ai_choose_tire(driver, race.current_weather)
+        return True
+
+    return False
+
+def generate_incident(driver, race):
+    """Náhodná porucha / nehoda"""
+    if driver.is_dnf or driver.incident_cooldown > 0:
+        driver.incident_cooldown -= 1
+        return False
+
+    roll = random.random()
+
+    if roll < 0.003:                                      # ~1x za 30–40 sekund na 20x
+        # Lehká nehoda → Yellow flag
+        driver.engine_damage += 0.4
+        race.yellow_flag_active = True
+        print(f"🟡 ŽLUTÁ VLÁJKA – {driver.name} měl spin!")
+        driver.incident_cooldown = 8
+        return True
+
+    elif roll < 0.008:                                    # Došlo palivo / motor
+        if random.random() < 0.5:
+            driver.fuel = 0.0
+            driver.is_dnf = True
+            driver.dnf_reason = "Fuel"
+            driver.finished = True
+            print(f"⛽ DNF – {driver.name} došlo palivo!")
+        else:
+            driver.engine_damage = 1.0
+            driver.is_dnf = True
+            driver.dnf_reason = "Engine"
+            driver.finished = True
+            print(f"🔥 DNF – {driver.name} selhal motor!")
+        race.vsc_active = True
+        race.vsc_timer = random.uniform(8, 15)
+        return True
+
+    elif roll < 0.012:                                    # Velká nehoda
+        driver.is_dnf = True
+        driver.dnf_reason = random.choice(["Crash", "Spin + Wall", "Big Shunt"])
+        driver.finished = True
+        print(f"💥 DNF – {driver.name} havaroval ({driver.dnf_reason})")
+
+        # Podle vážnosti
+        if random.random() < 0.6:
+            race.safety_car_active = True
+            race.safety_car_timer = random.uniform(15, 30)
+            print("🚨 SAFETY CAR nasazen!")
+        else:
+            race.vsc_active = True
+            race.vsc_timer = random.uniform(10, 20)
+            print("🚧 VSC nasazen!")
+        return True
+
+    return False
+
 def calculate_gaps(drivers, track):
     
     path_len = len(track["racing_line"])
@@ -416,6 +559,9 @@ class ChampionshipScreen(Screen):
         self.next_race_button = None
         
         self.race_finished = False
+
+        self.yellow_flag_active = False
+        self.yellow_flag_timer = 0.0
     
     def _initialize_championship(self):
         """Inicializuje všechny týmy a jezdce"""
@@ -504,17 +650,29 @@ class ChampionshipScreen(Screen):
             print(f"⚠️ Nelze načíst obrázek trati: {self.current_track['map']}")
             print(f"   Chyba: {e}")
         
-        # Reset drivers
+                # Reset jezdců + strategie
         for driver in self.drivers:
             driver.track_index = 0
-            driver.progress = 0
+            driver.progress = 0.0
             driver.current_lap = 0
             driver.finished = False
-            driver.pit_requested = True
-            driver.next_tire = ai_choose_tire(driver, self.current_weather)
+            driver.pit_requested = False
+            driver.on_pit_lane = False
+            driver.in_pit = False
+            driver.pit_timer = 0.0
             driver.tire_wear = 0.0
-            driver.race_points = 0
+            driver.last_pit_lap = -1
+            driver.current_stint_laps = 0
+            driver.tire = "MEDIUM"
+            driver.next_tire = "MEDIUM"
             driver.total_time = 0.0
+            driver.race_points = 0
+            driver.drs_active = False
+            driver.strategy_aggression = random.uniform(0.75, 1.35)
+            driver.planned_stops = 2 if random.random() < 0.7 else 1   # většina 2-stop
+
+            # První stint naplánovat
+            ai_plan_stint(driver, self, is_first_stint=True)
         
         self.race_time = 0.0
         self.race_finished = False
@@ -784,6 +942,13 @@ class ChampionshipScreen(Screen):
             driver.total_time = 0.0
             driver.race_points = 0
             driver.drs_active = False
+
+            driver.fuel = 1.0
+            driver.engine_damage = 0.0
+            driver.is_dnf = False
+            driver.dnf_reason = None
+            driver.reliability = random.uniform(0.82, 0.98)
+            driver.incident_cooldown = 0
         
         self.race_time = 0.0
         self.race_finished = False
@@ -859,15 +1024,42 @@ class ChampionshipScreen(Screen):
 
             driver.ai_decision_timer += delta_time
 
-            # AI rozhodnutí
-            if driver != self.selected_driver and driver.ai_decision_timer > 1.8:
-                driver.pace_mode = ai_choose_pace(driver, race_progress, self.current_weather)
-                driver.ai_decision_timer = 0
+                        # === PORUCHY A INCIDENTY ===
+            if random.random() < 0.015 and not driver.is_dnf:   # každé kolo malá šance
+                if generate_incident(driver, self):
+                    pass
 
-            if driver != self.selected_driver:
-                if ai_should_pit(driver, self) and not driver.pit_requested:
+            # Časovače vlajek
+            if self.yellow_flag_active:
+                self.yellow_flag_timer += delta_time
+                if self.yellow_flag_timer > 6:
+                    self.yellow_flag_active = False
+                    self.yellow_flag_timer = 0
+
+            if self.vsc_active:
+                self.vsc_timer -= delta_time
+                if self.vsc_timer <= 0:
+                    self.vsc_active = False
+
+            if self.safety_car_active:
+                self.safety_car_timer -= delta_time
+                if self.safety_car_timer <= 0:
+                    self.safety_car_active = False
+
+            # AI rozhodnutí každých ~1.5–2 sekundy simulace
+            if driver != self.selected_driver and driver.ai_decision_timer > 1.6:
+                driver.pace_mode = ai_choose_pace(driver, race_progress, self.current_weather)
+                
+                # Nové rozhodnutí o pitu
+                if ai_should_pit(driver, self):
                     driver.pit_requested = True
-                    driver.next_tire = ai_choose_tire(driver, self.current_weather)
+                    driver.last_pit_lap = driver.current_lap
+                
+                # Po pitu naplánuj další stint
+                if driver.in_pit and driver.pit_timer > PIT_TIME - 0.1:
+                    ai_plan_stint(driver, self, is_first_stint=False)
+                
+                driver.ai_decision_timer = 0
 
             # ────────────────────────────────────────────────
             #       HLAVNÍ VÝPOČET RYCHLOSTI – nejdůležitější část
@@ -989,22 +1181,32 @@ class ChampionshipScreen(Screen):
     def draw(self, screen):
         screen.fill((0, 100, 0))
         
-        # Race info
-        time_text = self.font_big.render(f"Čas: {self.race_time:.1f}s", True, (255, 255, 255))
-        screen.blit(time_text, (20, 20))
-        
+                # Race info + kola
+        lap_text = self.font_big.render(
+            f"Kolo {max(d.current_lap for d in self.drivers)}/{self.current_track['laps']}",
+            True, (255, 255, 100)
+        )
+        screen.blit(lap_text, (20, 20))
+
+        time_text = self.font.render(f"Čas: {self.race_time:.1f}s", True, (255, 255, 255))
+        screen.blit(time_text, (20, 55))
+
         speed_text = self.font.render(f"Rychlost: {self.time_scale}x", True, (255, 255, 255))
-        screen.blit(speed_text, (20, 60))
-        
+        screen.blit(speed_text, (20, 80))
+
         weather_text = self.font.render(f"Počasí: {self.current_weather}", True, (255, 255, 0))
-        screen.blit(weather_text, (20, 90))
-        
+        screen.blit(weather_text, (20, 105))
+
+        # Vlajky
         if self.safety_car_active:
-            sc_text = self.font.render("🚗 SAFETY CAR", True, (255, 200, 0))
-            screen.blit(sc_text, (20, 120))
-        
-        race_round = self.font.render(f"Kolo {self.championship_round}: {self.current_track['name']}", True, (255, 255, 255))
-        screen.blit(race_round, (20, 150))
+            sc = self.font.render("🚨 SAFETY CAR", True, (255, 80, 0))
+            screen.blit(sc, (420, 20))
+        elif self.vsc_active:
+            vsc = self.font.render("🚧 VSC", True, (255, 200, 0))
+            screen.blit(vsc, (420, 20))
+        elif self.yellow_flag_active:
+            yf = self.font.render("🟡 ŽLUTÁ VLÁJKA", True, (255, 255, 0))
+            screen.blit(yf, (420, 20))
         
         # Leaderboard – upravené gapy
         y = 200
@@ -1036,12 +1238,17 @@ class ChampionshipScreen(Screen):
             color = self.teams.get(driver.team_name, (200,200,200)).color
             drs = " DRS" if driver.drs_active else ""
             
+            if driver.is_dnf:
+                status = f" DNF ({driver.dnf_reason})"
+                color = (180, 50, 50)
+            else:
+                status = drs
+                color = self.teams.get(driver.team_name, (200,200,200)).color
+
             text = self.font.render(
-                f"P{i+1} {driver.name}{drs} | {gap_str}",
+                f"P{i+1} {driver.name}{status} | {gap_str}",
                 True, color
             )
-            screen.blit(text, (28, y + 6))
-            y += 36
         
         # Paused
         if self.paused:
