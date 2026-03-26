@@ -193,7 +193,7 @@ def ai_should_pit(driver, race):
     if driver.current_lap - driver.last_pit_lap < driver.pit_cooldown_laps:
         return False
     
-    if driver.tire_wear > 0.75:
+    if driver.tire_wear > 0.70:
         return True 
     
     if race.safety_car_active or race.vsc_active:
@@ -205,6 +205,11 @@ def ai_should_pit(driver, race):
     
     if race.current_weather == "SUN" and driver.tire in ["INTER", "WET"]:
         return True 
+    
+    # Normální pit podle plánu + opotřebení
+    if driver.current_stint_laps >= driver.target_stint_end or driver.tire_wear > 0.72:
+        driver.next_tire = ai_choose_tire(driver, race.current_weather)
+        return True
         
     return False
 
@@ -723,19 +728,34 @@ class ChampionshipScreen(Screen):
                         driver.finished = True
 
             wear_rate = PACE[driver.pace_mode]["wear"] * TIRES[driver.tire]["wear"]
-            driver.tire_wear += delta_time * wear_rate * 0.018
+            driver.tire_wear += delta_time * wear_rate * 0.085   # ← zrychlené opotřebení
             driver.tire_wear = min(1.0, driver.tire_wear)
+
+            # === PIT STOP LOGIKA ===
+            if driver.pit_requested and not driver.in_pit and not driver.on_pit_lane:
+                # Začátek pit stopu - jezdec zajede do pitlane
+                driver.on_pit_lane = True
+                driver.in_pit = True
+                driver.pit_timer = 0.0
+                driver.pit_requested = False
+                print(f"→ {driver.name} zajíždí do boxů")
 
             if driver.in_pit:
                 driver.pit_timer += delta_time
+                
+                # Po dokončení pit stopu
                 if driver.pit_timer >= PIT_TIME:
                     driver.in_pit = False
+                    driver.on_pit_lane = False
                     driver.tire = driver.next_tire
                     driver.tire_wear = 0.0
-                    driver.pit_requested = False
                     driver.last_pit_lap = driver.current_lap
-                    driver.track_index = (driver.track_index + 6) % path_len
-                    driver.progress = 0.0
+                    
+                    # Vrátíme jezdce zpět na trať (o několik pozic vpřed)
+                    driver.track_index = (driver.track_index + 8) % path_len
+                    driver.progress = 0.3   # trochu vpřed, aby nevznikaly kolize
+                    
+                    print(f"✓ {driver.name} dokončil pit stop → {driver.tire}")
 
         self.update_drs()
         self.handle_battles()
@@ -796,14 +816,14 @@ class ChampionshipScreen(Screen):
                         return
 
                 elif self.state == "RACE":
-                    # Pit button 1
+                    # Klik na BOX jezdec 1
                     if self.pit_button1 and self.pit_button1.collidepoint(pos):
                         self.show_tire_select = True
                         self.tire_select_for = "driver1"
                         self.tire_select_buttons = []
                         return
 
-                    # Pit button 2
+                    # Klik na BOX jezdec 2
                     if self.pit_button2 and self.pit_button2.collidepoint(pos):
                         self.show_tire_select = True
                         self.tire_select_for = "driver2"
@@ -811,7 +831,7 @@ class ChampionshipScreen(Screen):
                         return
 
                     # Výběr pneumatik
-                    if self.show_tire_select:
+                    if self.show_tire_select and self.tire_select_buttons:
                         for rect, tire_type in self.tire_select_buttons:
                             if rect.collidepoint(pos):
                                 if self.tire_select_for == "driver1":
@@ -857,15 +877,13 @@ class ChampionshipScreen(Screen):
             screen.blit(txt, txt.get_rect(center=self.start_season_button.center))
 
         elif self.state == "RACE":
-            # === HORNÍ ŘÁDEK ===
+            # Horní informace
             current_lap = max((d.current_lap for d in self.drivers), default=0)
             track_name = self.current_track["name"] if self.current_track else "?"
 
             screen.blit(self.font_big.render(f"Kolo {current_lap}/{self.current_track['laps']}", True, (255, 255, 100)), (40, 25))
             screen.blit(self.font.render(f"Čas: {self.race_time:.1f}s", True, (255, 255, 255)), (40, 65))
             screen.blit(self.font.render(f"Počasí: {self.current_weather}", True, (255, 255, 0)), (40, 95))
-
-            # Název trati uprostřed nahoře
             screen.blit(self.font_big.render(track_name.upper(), True, (255, 215, 0)), 
                         self.font_big.render(track_name.upper(), True, (255, 215, 0)).get_rect(centerx=960, centery=45))
 
@@ -877,7 +895,7 @@ class ChampionshipScreen(Screen):
             elif self.yellow_flag_active:
                 screen.blit(self.font.render("🟡 ŽLUTÁ VLÁJKA", True, (255, 255, 0)), (1250, 30))
 
-            # === LEVÝ PANEL - LEADERBOARD (jako na obr. 2) ===
+            # === LEADERBOARD VLEVO ===
             y = 170
             self.driver_rects = []
             ordered = sorted(self.drivers, key=lambda d: d.current_lap*10000 + d.track_index*100 + d.progress*100, reverse=True)
@@ -910,7 +928,7 @@ class ChampionshipScreen(Screen):
                 screen.blit(text, (40, y + 7))
                 y += 38
 
-            # === VELKÁ MAPA UPROSTŘED ===
+            # === VELKÁ MAPA UPROSTŘED (přesně jako na obrázku 2) ===
             map_x, map_y = 480, 110
             map_w, map_h = 720, 440
             if self.track_image:
@@ -921,6 +939,22 @@ class ChampionshipScreen(Screen):
                 scale_y = map_h / self.track_source_height
                 path = self.current_track["racing_line"]
 
+                # DRS zóny
+                for start, end in self.current_track.get("drs_zones", []):
+                    for i in range(start, min(end, len(path)-1)):
+                        x1 = path[i][0] * scale_x + map_x
+                        y1 = path[i][1] * scale_y + map_y
+                        x2 = path[i+1][0] * scale_x + map_x
+                        y2 = path[i+1][1] * scale_y + map_y
+                        pygame.draw.line(screen, (0, 220, 255), (int(x1), int(y1)), (int(x2), int(y2)), 5)
+                
+                # Pit lane
+                if "pit_lane" in self.current_track:
+                    scaled_pit = [(p[0]*scale_x + map_x, p[1]*scale_y + map_y) for p in self.current_track["pit_lane"]]
+                    if len(scaled_pit) > 1:
+                        pygame.draw.lines(screen, (255, 140, 0), False, scaled_pit, 4)
+
+                # Auta na trati
                 for driver in self.drivers:
                     if driver.is_dnf or driver.finished: continue
                     i = driver.track_index
@@ -935,36 +969,48 @@ class ChampionshipScreen(Screen):
                     pygame.draw.circle(screen, (255,255,255), (int(x), int(y)), size + 3)
                     pygame.draw.circle(screen, color, (int(x), int(y)), size)
 
-            # === BOXY PRO JEZDCE 1 A 2 (dole vlevo) ===
-            box_y = 900
+            # === BOXY PRO JEZDCE 1 A 2 (uprostřed pod speed buttons, BOX uvnitř černého boxu) ===
+            box_y = 650
             box_w = 380
-            box_h = 110
+            box_h = 95
 
-            # Jezdec 1
+            # Jezdec 1 - celý černý box
             d1 = self.player_team.drivers[0]
-            pygame.draw.rect(screen, (30, 30, 40), (200, box_y, box_w, box_h))
-            pygame.draw.rect(screen, self.teams[d1.team_name].color, (200, box_y, box_w, box_h), 4)
-            screen.blit(self.font.render(f"1. {d1.name}", True, (255,255,255)), (220, box_y + 15))
-            screen.blit(self.font.render(f"Gumy: {d1.tire}", True, (255, 215, 0)), (220, box_y + 55))
+            wear1 = int(d1.tire_wear * 100)
+            box1_rect = pygame.Rect(480, box_y, box_w, box_h)
+            pygame.draw.rect(screen, (30, 30, 40), box1_rect)                    # černý background
+            pygame.draw.rect(screen, self.teams[d1.team_name].color, box1_rect, 4)  # barevný rámeček
 
-            self.pit_button1 = pygame.Rect(290, box_y + 20, 80, 70)
+            screen.blit(self.font.render(f"1. {d1.name}", True, (255,255,255)), (500, box_y + 12))
+            screen.blit(self.font.render(f"Gumy: {d1.tire}", True, (255,215,0)), (500, box_y + 42))
+            screen.blit(self.font_small.render(f"Opotřebení kol: {wear1}%", True, (255,180,0)), (500, box_y + 68))
+
+            # Tlačítko BOX uvnitř černého boxu (vpravo)
+            self.pit_button1 = pygame.Rect(780, box_y + 18, 75, 60)
             pygame.draw.rect(screen, (200, 60, 60), self.pit_button1)
+            pygame.draw.rect(screen, (255,255,255), self.pit_button1, 3)
             screen.blit(self.font.render("BOX", True, (255,255,255)), 
                         self.font.render("BOX", True, (255,255,255)).get_rect(center=self.pit_button1.center))
 
-            # Jezdec 2
+            # Jezdec 2 - celý černý box
             d2 = self.player_team.drivers[1]
-            pygame.draw.rect(screen, (30, 30, 40), (600, box_y, box_w, box_h))
-            pygame.draw.rect(screen, self.teams[d2.team_name].color, (600, box_y, box_w, box_h), 4)
-            screen.blit(self.font.render(f"2. {d2.name}", True, (255,255,255)), (620, box_y + 15))
-            screen.blit(self.font.render(f"Gumy: {d2.tire}", True, (255, 215, 0)), (620, box_y + 55))
+            wear2 = int(d2.tire_wear * 100)
+            box2_rect = pygame.Rect(880, box_y, box_w, box_h)
+            pygame.draw.rect(screen, (30, 30, 40), box2_rect)
+            pygame.draw.rect(screen, self.teams[d2.team_name].color, box2_rect, 4)
 
-            self.pit_button2 = pygame.Rect(690, box_y + 20, 80, 70)
+            screen.blit(self.font.render(f"2. {d2.name}", True, (255,255,255)), (900, box_y + 12))
+            screen.blit(self.font.render(f"Gumy: {d2.tire}", True, (255,215,0)), (900, box_y + 42))
+            screen.blit(self.font_small.render(f"Opotřebení kol: {wear2}%", True, (255,180,0)), (900, box_y + 68))
+
+            # Tlačítko BOX uvnitř černého boxu (vpravo)
+            self.pit_button2 = pygame.Rect(1180, box_y + 18, 75, 60)
             pygame.draw.rect(screen, (200, 60, 60), self.pit_button2)
+            pygame.draw.rect(screen, (255,255,255), self.pit_button2, 3)
             screen.blit(self.font.render("BOX", True, (255,255,255)), 
                         self.font.render("BOX", True, (255,255,255)).get_rect(center=self.pit_button2.center))
 
-            # === TLAČÍTKA PAUSE + RYCHLOST (dole uprostřed) ===
+            # === PAUSE + SPEED BUTTONS (dole uprostřed) ===
             btn_y = 580
             btn_width = 90
             btn_height = 55
@@ -987,10 +1033,9 @@ class ChampionshipScreen(Screen):
                 screen.blit(txt, txt.get_rect(center=rect.center))
                 self.speed_buttons.append({"rect": rect, "speed": spd})
 
-            # === PRAVÝ PANEL - STANDINGS (jako na obr. 2) ===
+            # === PRAVÝ PANEL - STANDINGS ===
             right_x = 1650
             screen.blit(self.font_big.render("CHAMPIONSHIP STANDINGS", True, (255, 255, 0)), (right_x - 240, 20))
-
             y = 70
             for i, team in enumerate(sorted(self.teams.values(), key=lambda t: t.points, reverse=True)[:10]):
                 txt = self.font.render(f"{i+1}. {team.name}: {team.points} pts", True, team.color)
@@ -1005,7 +1050,7 @@ class ChampionshipScreen(Screen):
                 screen.blit(txt, (right_x - 240, y))
                 y += 26
 
-            # Výběr pneumatik
+            # === VÝBĚR PNEUMATIK (zeleně označená vybraná guma) ===
             if self.show_tire_select:
                 overlay = pygame.Rect(520, 280, 480, 420)
                 pygame.draw.rect(screen, (20,20,35), overlay)
@@ -1017,10 +1062,18 @@ class ChampionshipScreen(Screen):
                                "INTER":(0,180,255), "WET":(30,80,255)}
 
                 self.tire_select_buttons = []
+                selected_tire = None
+                if self.tire_select_for == "driver1":
+                    selected_tire = self.player_team.drivers[0].next_tire
+                elif self.tire_select_for == "driver2":
+                    selected_tire = self.player_team.drivers[1].next_tire
+
                 for i, tire in enumerate(tires):
                     btn = pygame.Rect(570, 380 + i*58, 380, 50)
-                    pygame.draw.rect(screen, tire_colors[tire], btn)
-                    pygame.draw.rect(screen, (255,255,255), btn, 3)
+                    color = tire_colors[tire]
+                    border_color = (0, 255, 0) if tire == selected_tire else (255,255,255)
+                    pygame.draw.rect(screen, color, btn)
+                    pygame.draw.rect(screen, border_color, btn, 4)   # zelený rám pro vybranou
                     txt = self.font.render(tire, True, (0,0,0))
                     screen.blit(txt, txt.get_rect(center=btn.center))
                     self.tire_select_buttons.append((btn, tire))
