@@ -884,8 +884,36 @@ class ChampionshipScreen(Screen):
             screen.blit(self.font_big.render(f"Kolo {current_lap}/{self.current_track['laps']}", True, (255, 255, 100)), (40, 25))
             screen.blit(self.font.render(f"Čas: {self.race_time:.1f}s", True, (255, 255, 255)), (40, 65))
             screen.blit(self.font.render(f"Počasí: {self.current_weather}", True, (255, 255, 0)), (40, 95))
+
+            # Název trati uprostřed
             screen.blit(self.font_big.render(track_name.upper(), True, (255, 215, 0)), 
                         self.font_big.render(track_name.upper(), True, (255, 215, 0)).get_rect(centerx=960, centery=45))
+
+            # === PODIUM (zobrazí se po skončení závodu) ===
+            if self.race_finished:
+                # Seřadíme dokončené jezdce podle času
+                finished = [d for d in self.drivers if d.finished or d.is_dnf]
+                finished.sort(key=lambda d: d.total_time if d.total_time > 0 else 999999)
+
+                podium_y = 80
+
+                # 1. místo
+                if len(finished) > 0:
+                    d1 = finished[0]
+                    color1 = (255, 215, 0)  # zlato
+                    screen.blit(self.font_big.render(f"1. {d1.name}", True, color1), (780, podium_y))
+
+                # 2. místo
+                if len(finished) > 1:
+                    d2 = finished[1]
+                    color2 = (192, 192, 192)  # stříbro
+                    screen.blit(self.font.render(f"2. {d2.name}", True, color2), (820, podium_y + 45))
+
+                # 3. místo
+                if len(finished) > 2:
+                    d3 = finished[2]
+                    color3 = (205, 127, 50)   # bronz
+                    screen.blit(self.font.render(f"3. {d3.name}", True, color3), (820, podium_y + 75))
 
             # Vlajky
             if self.safety_car_active:
@@ -928,7 +956,7 @@ class ChampionshipScreen(Screen):
                 screen.blit(text, (40, y + 7))
                 y += 38
 
-            # === VELKÁ MAPA UPROSTŘED (přesně jako na obrázku 2) ===
+            # === MAPA + AUTA ===
             map_x, map_y = 480, 110
             map_w, map_h = 720, 440
             if self.track_image:
