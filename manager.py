@@ -795,7 +795,7 @@ class ChampionshipScreen(Screen):
                             self.player_team = team
                             self.state = "SEASON_START"
                             print(f"Vybrán tým: {team_name}")
-                            return   # ← důležité: ukončíme zpracování, aby se neklikalo dál
+                            return
 
                 elif self.state == "SEASON_START":
                     if self.start_season_button and self.start_season_button.collidepoint(pos):
@@ -804,14 +804,13 @@ class ChampionshipScreen(Screen):
                         return
 
                 elif self.state == "RACE":
-                    # Klik na BOX jezdec 1
+                    # Klik na BOX jezdec 1 a 2
                     if self.pit_button1 and self.pit_button1.collidepoint(pos):
                         self.show_tire_select = True
                         self.tire_select_for = "driver1"
                         self.tire_select_buttons = []
                         return
 
-                    # Klik na BOX jezdec 2
                     if self.pit_button2 and self.pit_button2.collidepoint(pos):
                         self.show_tire_select = True
                         self.tire_select_for = "driver2"
@@ -833,7 +832,7 @@ class ChampionshipScreen(Screen):
                                 print(f"Nasazeny {tire_type} pro {self.tire_select_for}")
                                 return
 
-                    # Pause + speed buttons (tvůj původní kód)
+                    # Myš na pause a speed tlačítka
                     if self.pause_button and self.pause_button.collidepoint(pos):
                         self.paused = not self.paused
 
@@ -843,6 +842,29 @@ class ChampionshipScreen(Screen):
 
                     if self.race_finished and self.next_race_button and self.next_race_button.collidepoint(pos):
                         self.next_race()
+
+            # ==================== KLÁVESNICOVÉ OVLÁDÁNÍ ====================
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    change_screen(GAME_STATE_MENU)
+
+                # Pause
+                elif event.key == pygame.K_SPACE:
+                    self.paused = not self.paused
+
+                # Rychlosti času
+                elif event.key == pygame.K_1:
+                    self.time_scale = 1
+                elif event.key == pygame.K_2:
+                    self.time_scale = 2
+                elif event.key == pygame.K_3:
+                    self.time_scale = 4
+                elif event.key == pygame.K_4:
+                    self.time_scale = 20
+
+                # Rychlé přepínání 1x ↔ 20x
+                elif event.key == pygame.K_TAB:
+                    self.time_scale = 20 if self.time_scale == 1 else 1
 
     def draw(self, screen):
         screen.fill((0, 100, 0))
@@ -1056,27 +1078,41 @@ class ChampionshipScreen(Screen):
             screen.blit(self.font.render("BOX", True, (255,255,255)), 
                         self.font.render("BOX", True, (255,255,255)).get_rect(center=self.pit_button2.center))
 
+
             # === PAUSE + SPEED BUTTONS (dole uprostřed) ===
             btn_y = 580
             btn_width = 90
             btn_height = 55
             start_x = 620
 
+            # Pause button
             self.pause_button = pygame.Rect(start_x, btn_y, btn_width, btn_height)
-            pause_color = (255, 100, 100) if self.paused else (100, 100, 100)
+            pause_color = (255, 80, 80) if self.paused else (100, 100, 100)
             pygame.draw.rect(screen, pause_color, self.pause_button)
             pause_text = self.font.render("PAUSE", True, (255, 255, 255))
             screen.blit(pause_text, pause_text.get_rect(center=self.pause_button.center))
 
+            # Speed buttons s vizuálním zvýrazněním
             self.speed_buttons = []
             speeds = [1, 2, 4, 20]
             texts = ["1x", "2x", "4x", "20x"]
             for i, spd in enumerate(speeds):
                 rect = pygame.Rect(start_x + 110 + i * 105, btn_y, btn_width, btn_height)
-                color = (200, 200, 0) if spd == self.time_scale else (70, 70, 80)
+                
+                # Zvýraznění - žlutá barva pokud je aktivní (klávesnice nebo myš)
+                if spd == self.time_scale:
+                    color = (255, 215, 0)      # zlatá
+                    text_color = (0, 0, 0)
+                else:
+                    color = (70, 70, 80)
+                    text_color = (255, 255, 255)
+                
                 pygame.draw.rect(screen, color, rect)
-                txt = self.font.render(texts[i], True, (255, 255, 255))
+                pygame.draw.rect(screen, (255, 255, 255), rect, 3)  # bílý rámeček
+                
+                txt = self.font.render(texts[i], True, text_color)
                 screen.blit(txt, txt.get_rect(center=rect.center))
+                
                 self.speed_buttons.append({"rect": rect, "speed": spd})
 
             # === PRAVÝ PANEL - STANDINGS ===
@@ -1208,5 +1244,5 @@ while True:
     screen.fill((20,20,20))
 
     current_screen.draw(screen)
-    
+
     pygame.display.flip()
