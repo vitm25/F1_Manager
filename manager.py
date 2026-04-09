@@ -2,6 +2,9 @@ import pygame
 import math
 import sys
 import random
+import json
+import os
+from datetime import datetime
 from tracks_data import tracks
 from championship_data import TEAMS, DRIVER_BASE_TIMES, CALENDAR_2025
 pygame.init() # spusteni knihovny
@@ -509,6 +512,12 @@ class ChampionshipScreen(Screen):
         self.tire_select_for = None
         self.tire_select_buttons = []
 
+        # === UKLÁDÁNÍ HRY ===
+        self.save_message = ""
+        self.save_message_timer = 0.0
+        self.save_folder = "saves"
+        os.makedirs(self.save_folder, exist_ok=True)   # vytvoří složku saves, pokud neexistuje
+
         self._initialize_championship()
 
     def _initialize_championship(self):
@@ -616,10 +625,170 @@ class ChampionshipScreen(Screen):
             return False
         self._load_race()
         return True
+    
+    def save_game(self, slot=1):
+        """Uloží hru do vybraného slotu"""
+        if self.state != "RACE" or not hasattr(self, 'player_team') or not self.player_team:
+            self.save_message = "Ukládání možné jen během závodu!"
+            self.save_message_timer = 3.0
+            print("❌ " + self.save_message)
+            return
+
+        # Vytvoření názvu souboru
+        track_name = self.current_track["name"] if self.current_track else "Unknown"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        filename = f"save{slot}_{track_name.replace(' ', '_')}_Round{self.championship_round}_{timestamp}.json"
+        filepath = os.path.join(self.save_folder, filename)
+
+        save_data = {
+            "save_version": "1.1",
+            "timestamp": datetime.now().isoformat(),
+            "current_race_index": self.current_race_index,
+            "championship_round": self.championship_round,
+            "race_time": round(self.race_time, 2),
+            "current_weather": self.current_weather,
+            "safety_car_active": self.safety_car_active,
+            "safety_car_timer": round(self.safety_car_timer, 2),
+            "vsc_active": self.vsc_active,
+            "vsc_timer": round(self.vsc_timer, 2),
+            "yellow_flag_active": self.yellow_flag_active,
+            "time_scale": self.time_scale,
+            "paused": self.paused,
+            "race_finished": self.race_finished,
+            "player_team_name": self.player_team.name,
+            "teams": {},
+            "drivers": []
+        }
+
+        # Týmy
+        for team_name, team in self.teams.items():
+            save_data["teams"][team_name] = {"points": team.points}
+
+        # Jezdci
+        for driver in self.drivers:
+            driver_data = {
+                "name": driver.name,
+                "team_name": driver.team_name,
+                "points": driver.points,
+                "base_lap_time": round(driver.base_lap_time, 4),
+                "tire": driver.tire,
+                "next_tire": driver.next_tire,
+                "tire_wear": round(driver.tire_wear, 4),
+                "current_lap": driver.current_lap,
+                "total_time": round(driver.total_time, 2),
+                "track_index": driver.track_index,
+                "progress": round(driver.progress, 4),
+                "pace_mode": driver.pace_mode,
+                "strategy_aggression": round(driver.strategy_aggression, 4),
+                "planned_stops": driver.planned_stops,
+                "current_stint_laps": driver.current_stint_laps,
+                "target_stint_end": driver.target_stint_end,
+                "last_pit_lap": driver.last_pit_lap,
+                "is_dnf": driver.is_dnf,
+                "dnf_reason": driver.dnf_reason,
+                "drs_active": driver.drs_active,
+                "in_pit": driver.in_pit,
+                "pit_timer": round(driver.pit_timer, 2)
+            }
+            save_data["drivers"].append(driver_data)
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(save_data, f, indent=4, ensure_ascii=False)
+            
+            self.save_message = f"Hra uložena! (Slot {slot})"
+            self.save_message_timer = 3.0
+            print(f"✅ Hra uložena jako: {filename}")
+        except Exception as e:
+            self.save_message = "Chyba při ukládání!"
+            self.save_message_timer = 3.0
+            print(f"❌ Chyba ukládání: {e}")
+
+    def load_game(self, slot=1):
+        """Načte hru z vybraného slotu (načte nejnovější soubor v daném slotu)"""
+        if not os.path.exists(self.save_folder):
+            self.save_message = "Žádné uložené hry!"
+            self.save_message_timer = 3.0
+            return False
+
+        # Najdeme všechny soubory pro daný slot
+        files = [f for f in os.listdir(self.save_folder) if f.startswith(f"save{slot}_") and f.endswith(".json")]
+        if not files:
+            self.save_message = f"Slot {slot} je prázdný!"
+            self.save_message_timer = 3.0
+            return False
+
+        # Seřadíme podle data vytvoření (nejnovější první)
+        files.sort(key=lambda x: os.path.getmtime(os.path.join(self.save_folder, x)), reverse=True)
+        filepath = os.path.join(self.save_folder, files[0])
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                save_data = json.load(f)
+
+            # Obnovení základních hodnot
+            self.current_race_index = save_data["current_race_index"]
+            self.championship_round = save_data["championship_round"]
+            self.race_time = save_data["race_time"]
+            self.current_weather = save_data["current_weather"]
+            self.safety_car_active = save_data["safety_car_active"]
+            self.safety_car_timer = save_data["safety_car_timer"]
+            self.vsc_active = save_data["vsc_active"]
+            self.vsc_timer = save_data["vsc_timer"]
+            self.yellow_flag_active = save_data["yellow_flag_active"]
+            self.time_scale = save_data.get("time_scale", 1)
+            self.paused = save_data.get("paused", False)
+            self.race_finished = save_data.get("race_finished", False)
+
+            # Obnovení týmů
+            for team_name, data in save_data["teams"].items():
+                if team_name in self.teams:
+                    self.teams[team_name].points = data["points"]
+
+            # Obnovení jezdců
+            for d_data in save_data["drivers"]:
+                for driver in self.drivers:
+                    if driver.name == d_data["name"]:
+                        driver.points = d_data["points"]
+                        driver.tire = d_data["tire"]
+                        driver.next_tire = d_data["next_tire"]
+                        driver.tire_wear = d_data["tire_wear"]
+                        driver.current_lap = d_data["current_lap"]
+                        driver.total_time = d_data["total_time"]
+                        driver.track_index = d_data["track_index"]
+                        driver.progress = d_data["progress"]
+                        driver.pace_mode = d_data["pace_mode"]
+                        driver.strategy_aggression = d_data["strategy_aggression"]
+                        driver.planned_stops = d_data["planned_stops"]
+                        driver.current_stint_laps = d_data["current_stint_laps"]
+                        driver.target_stint_end = d_data["target_stint_end"]
+                        driver.last_pit_lap = d_data["last_pit_lap"]
+                        driver.is_dnf = d_data["is_dnf"]
+                        driver.dnf_reason = d_data.get("dnf_reason")
+                        driver.drs_active = d_data.get("drs_active", False)
+                        driver.in_pit = d_data.get("in_pit", False)
+                        driver.pit_timer = d_data.get("pit_timer", 0.0)
+                        break
+
+            self._load_race()
+
+            self.save_message = f"Načteno: {files[0]}"
+            self.save_message_timer = 4.0
+            print(f"✅ Hra načtena: {files[0]}")
+            return True
+
+        except Exception as e:
+            self.save_message = "Chyba při načítání!"
+            self.save_message_timer = 3.0
+            print(f"❌ Chyba načítání: {e}")
+            return False
 
     def update(self, delta_time):
         if self.paused or not self.current_track or self.race_finished:
             return
+        
+        if self.save_message_timer > 0:
+            self.save_message_timer -= delta_time
         
         delta_time *= self.time_scale
         self.race_time += delta_time
@@ -848,23 +1017,25 @@ class ChampionshipScreen(Screen):
                 if event.key == pygame.K_ESCAPE:
                     change_screen(GAME_STATE_MENU)
 
-                # Pause
                 elif event.key == pygame.K_SPACE:
                     self.paused = not self.paused
 
-                # Rychlosti času
-                elif event.key == pygame.K_1:
-                    self.time_scale = 1
-                elif event.key == pygame.K_2:
-                    self.time_scale = 2
-                elif event.key == pygame.K_3:
-                    self.time_scale = 4
-                elif event.key == pygame.K_4:
-                    self.time_scale = 20
-
-                # Rychlé přepínání 1x ↔ 20x
+                elif event.key == pygame.K_1: self.time_scale = 1
+                elif event.key == pygame.K_2: self.time_scale = 2
+                elif event.key == pygame.K_3: self.time_scale = 4
+                elif event.key == pygame.K_4: self.time_scale = 20
                 elif event.key == pygame.K_TAB:
                     self.time_scale = 20 if self.time_scale == 1 else 1
+
+                # Ukládání a načítání
+                elif event.key == pygame.K_s:           # S = Save slot 1
+                    self.save_game(slot=1)
+                elif event.key == pygame.K_l:           # L = Load slot 1
+                    self.load_game(slot=1)
+                elif event.key == pygame.K_5:           # 5 = Save slot 2
+                    self.save_game(slot=2)
+                elif event.key == pygame.K_6:           # 6 = Load slot 2
+                    self.load_game(slot=2)
 
     def draw(self, screen):
         screen.fill((0, 100, 0))
@@ -898,6 +1069,15 @@ class ChampionshipScreen(Screen):
             # Název trati uprostřed
             screen.blit(self.font_big.render(track_name.upper(), True, (255, 215, 0)), 
                         self.font_big.render(track_name.upper(), True, (255, 215, 0)).get_rect(centerx=960, centery=45))
+            
+            # Zobrazení zprávy o uložení/načtení
+            if self.save_message_timer > 0:
+                alpha = int(255 * (self.save_message_timer / 3.0)) if self.save_message_timer < 3 else 255
+                # Jednoduchá verze bez alpha (pygame nemá snadno alpha pro text)
+                color = (0, 255, 100) if "uložena" in self.save_message or "Načteno" in self.save_message else (255, 100, 100)
+                msg_surf = self.font_big.render(self.save_message, True, color)
+                screen.blit(msg_surf, (960 - msg_surf.get_width()//2, 520))
+                self.save_message_timer -= delta_time   # budeš muset předat delta_time do draw, nebo použít clock
 
             # === PODIUM (zobrazí se po skončení závodu) ===
                         # === PODIUM (pouze jezdci, kteří dokončili závod) ===
