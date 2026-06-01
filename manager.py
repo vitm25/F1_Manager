@@ -36,6 +36,7 @@ GAME_STATE_PRACTICE = "PRACTICE"
 GAME_STATE_SETTINGS = "SETTINGS"
 GAME_STATE_RACE = "RACE"
 game_state = GAME_STATE_MENU
+GAME_STATE_LOAD = "Load"
 
 # tlačítka
 buttons = [
@@ -265,37 +266,57 @@ class Screen:
         pass
     
 class MenuScreen(Screen):
-    # tlačítka
     def __init__(self):
+        self.font = pygame.font.SysFont("arial", 28)
+        self.font_big = pygame.font.SysFont("arial", 48)
+
         self.buttons = [
-            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(800, 360, 300, 60), "action": GAME_STATE_RACE},
-            {"text": "PRACTICE", "rect": pygame.Rect(800, 440, 300, 60), "action": GAME_STATE_PRACTICE},
-            {"text": "SETTINGS", "rect": pygame.Rect(800, 520, 300, 60), "action": GAME_STATE_SETTINGS}
+            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(800, 340, 320, 65), "action": GAME_STATE_RACE},
+            {"text": "PRACTICE",     "rect": pygame.Rect(800, 420, 320, 65), "action": GAME_STATE_PRACTICE},
+            {"text": "SETTINGS",     "rect": pygame.Rect(800, 500, 320, 65), "action": GAME_STATE_SETTINGS},
+            {"text": "VYPNOUT",      "rect": pygame.Rect(800, 580, 320, 65), "action": "QUIT"}
         ]
-    # eventy
+
     def handle_events(self, events):
         global current_screen
-        
         for event in events:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = pygame.mouse.get_pos()
-                
                 for btn in self.buttons:
                     if btn["rect"].collidepoint(mouse_pos):
-                        change_screen(btn["action"])
-    # draw                    
+                        if btn["action"] == "QUIT":
+                            pygame.quit()
+                            sys.exit()
+                        else:
+                            change_screen(btn["action"])
+
     def draw(self, screen):
-        screen.fill((50,0,0))
-        
-        title = font.render("F1 MANAGER", True, (255,255,255))
-        screen.blit(title, (870,300))
+        # Tmavší, ale viditelnější pozadí (F1 styl)
+        screen.fill((20, 20, 40))  
+
+        # Nadpis - velký a bílý
+        title = self.font_big.render("F1 MANAGER", True, (255, 255, 255))
+        screen.blit(title, title.get_rect(centerx=960, centery=220))
+
+        mouse_pos = pygame.mouse.get_pos()
         
         for btn in self.buttons:
-            pygame.draw.rect(screen, (255,255,255), btn["rect"], 2)
-            
-            text = font.render(btn["text"], True, (255,255,255))
-            screen.blit(text, (btn["rect"].x+20, btn["rect"].y+15))
-            
+            # Hover efekt
+            if btn["rect"].collidepoint(mouse_pos):
+                border_color = (255, 215, 0)   # žlutý rámeček při najetí
+                text_color = (255, 215, 0)
+            else:
+                border_color = (255, 255, 255)
+                text_color = (255, 255, 255)   # bílý text
+
+            # Vykreslení tlačítka
+            pygame.draw.rect(screen, (40, 40, 70), btn["rect"])           # tmavý vnitřek
+            pygame.draw.rect(screen, border_color, btn["rect"], 4)        # bílý/žlutý rámeček
+
+            # Bílý text
+            text = self.font.render(btn["text"], True, text_color)
+            screen.blit(text, text.get_rect(center=btn["rect"].center))
+
 def ai_choose_pace(driver, race_progress, current_weather):
     
     # zničené gumy
@@ -520,6 +541,9 @@ class ChampionshipScreen(Screen):
 
         self._initialize_championship()
 
+        self.save_list = []
+        self.selected_save_index = 0
+
     def _initialize_championship(self):
         self.teams = {}
         self.drivers = []
@@ -604,7 +628,7 @@ class ChampionshipScreen(Screen):
             return
         self.race_finished = True
         
-        # Pouze jezdci, kteří skutečně dokončili závod (ne DNF)
+        # Seřazení dokončených jezdců (bez DNF)
         finished_drivers = [d for d in self.drivers if d.finished and not d.is_dnf]
         finished_drivers.sort(key=lambda d: d.total_time if d.total_time > 0 else 999999)
         
@@ -613,10 +637,13 @@ class ChampionshipScreen(Screen):
                 pts = POINTS[i]
                 driver.race_points = pts
                 driver.points += pts
-                print(f"✓ {i+1}. {driver.name} +{pts} bodů")
-        
+
         for team in self.teams.values():
             team.update_points()
+
+        # === AUTOMATICKÉ ULOŽENÍ PO ZÁVODĚ ===
+        self.save_game(slot=1)   # uloží do slotu 1
+        print("💾 Automatické uložení po závodě provedeno.")
 
     def next_race(self):
         self.current_race_index += 1
@@ -782,6 +809,35 @@ class ChampionshipScreen(Screen):
             self.save_message_timer = 3.0
             print(f"❌ Chyba načítání: {e}")
             return False
+        
+    def list_saves(self):
+        """Vrátí seznam všech uložených her"""
+        if not os.path.exists(self.save_folder):
+            return []
+        
+        saves = []
+        for file in os.listdir(self.save_folder):
+            if file.endswith(".json"):
+                try:
+                    path = os.path.join(self.save_folder, file)
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    saves.append({
+                        "filename": file,
+                        "date": data.get("timestamp", "Neznámé"),
+                        "track": data.get("current_track_name", "Neznámá"),
+                        "round": data.get("championship_round", "?"),
+                        "race_time": round(data.get("race_time", 0), 1)
+                    })
+                except:
+                    continue
+        return saves
+    
+    def show_save_list(self):
+        """Zobrazí grafický seznam uložených her"""
+        self.save_list = self.list_saves()
+        self.selected_save_index = 0
+        self.state = "SAVE_LIST"
 
     def update(self, delta_time):
         if self.paused or not self.current_track or self.race_finished:
@@ -885,7 +941,7 @@ class ChampionshipScreen(Screen):
                         driver.finished = True
 
             wear_rate = PACE[driver.pace_mode]["wear"] * TIRES[driver.tire]["wear"]
-            driver.tire_wear += delta_time * wear_rate * 0.085   # ← zrychlené opotřebení
+            driver.tire_wear += delta_time * wear_rate * 0.16   # ← zrychlené opotřebení
             driver.tire_wear = min(1.0, driver.tire_wear)
 
             # === PIT STOP LOGIKA ===
@@ -1012,6 +1068,22 @@ class ChampionshipScreen(Screen):
                     if self.race_finished and self.next_race_button and self.next_race_button.collidepoint(pos):
                         self.next_race()
 
+                elif self.state == "SAVE_LIST":
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            self.state = "RACE"
+                        elif event.key == pygame.K_UP and self.save_list:
+                            self.selected_save_index = max(0, self.selected_save_index - 1)
+                        elif event.key == pygame.K_DOWN and self.save_list:
+                            self.selected_save_index = min(len(self.save_list)-1, self.selected_save_index + 1)
+                        elif event.key == pygame.K_RETURN and self.save_list:
+                            # Načtení vybraného souboru
+                            selected_file = self.save_list[self.selected_save_index]["filename"]
+                            filepath = os.path.join(self.save_folder, selected_file)
+                            # ... (zde by byla logika načtení konkrétního souboru - pro jednoduchost načte slot 1 prozatím)
+                            self.load_game(slot=1)
+                            self.state = "RACE"
+
             # ==================== KLÁVESNICOVÉ OVLÁDÁNÍ ====================
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -1036,6 +1108,20 @@ class ChampionshipScreen(Screen):
                     self.save_game(slot=2)
                 elif event.key == pygame.K_6:           # 6 = Load slot 2
                     self.load_game(slot=2)
+
+                elif event.key == pygame.K_k:           # K = Show list of saves
+                    saves = self.list_saves()
+                    if saves:
+                        print("\n=== ULOŽENÉ HRY ===")
+                        for i, save in enumerate(saves[:10]):   # max 10 položek
+                            print(f"{i+1}. {save['filename']} | Kolo {save['round']} | {save['track']} | {save['date'][:16]}")
+                        self.save_message = f"Zobrazeno {len(saves)} uložených her (v konzoli)"
+                    else:
+                        self.save_message = "Žádné uložené hry nebyly nalezeny."
+                    self.save_message_timer = 4.0
+
+                elif event.key == pygame.K_k:           # K = Seznam uložených her
+                    self.show_save_list()
 
     def draw(self, screen):
         screen.fill((0, 100, 0))
@@ -1071,13 +1157,11 @@ class ChampionshipScreen(Screen):
                         self.font_big.render(track_name.upper(), True, (255, 215, 0)).get_rect(centerx=960, centery=45))
             
             # Zobrazení zprávy o uložení/načtení
+            # Zobrazení zprávy (uložení / načtení)
             if self.save_message_timer > 0:
-                alpha = int(255 * (self.save_message_timer / 3.0)) if self.save_message_timer < 3 else 255
-                # Jednoduchá verze bez alpha (pygame nemá snadno alpha pro text)
-                color = (0, 255, 100) if "uložena" in self.save_message or "Načteno" in self.save_message else (255, 100, 100)
-                msg_surf = self.font_big.render(self.save_message, True, color)
-                screen.blit(msg_surf, (960 - msg_surf.get_width()//2, 520))
-                self.save_message_timer -= delta_time   # budeš muset předat delta_time do draw, nebo použít clock
+                color = (0, 255, 120) if "uložena" in self.save_message.lower() or "načten" in self.save_message.lower() else (255, 200, 100)
+                msg = self.font.render(self.save_message, True, color)
+                screen.blit(msg, (960 - msg.get_width()//2, 520))
 
             # === PODIUM (zobrazí se po skončení závodu) ===
                         # === PODIUM (pouze jezdci, kteří dokončili závod) ===
@@ -1353,6 +1437,37 @@ class ChampionshipScreen(Screen):
                             self.font.render("DALŠÍ ZÁVOD →", True, (255,255,255)).get_rect(center=self.next_race_button.center))
 
                 pass
+
+            # Zobrazení zprávy (uložení / načtení / seznam)
+            if self.save_message_timer > 0:
+                color = (0, 255, 120) if "uložena" in self.save_message.lower() or "načten" in self.save_message.lower() else (255, 200, 100)
+                msg = self.font.render(self.save_message, True, color)
+                screen.blit(msg, (960 - msg.get_width()//2, 520))
+
+        elif self.state == "SAVE_LIST":
+            screen.fill((20, 20, 40))
+            title = self.font_big.render("ULOŽENÉ HRY", True, (255, 215, 0))
+            screen.blit(title, title.get_rect(centerx=960, centery=80))
+
+            if not self.save_list:
+                text = self.font.render("Žádné uložené hry...", True, (200, 200, 200))
+                screen.blit(text, text.get_rect(centerx=960, centery=300))
+            else:
+                for i, save in enumerate(self.save_list[:8]):  # max 8 položek
+                    y = 160 + i * 55
+                    rect = pygame.Rect(500, y, 920, 48)
+                    color = (70, 70, 110) if i == self.selected_save_index else (40, 40, 70)
+                    pygame.draw.rect(screen, color, rect)
+                    pygame.draw.rect(screen, (255, 215, 0), rect, 3)
+
+                    date = save['date'][:16] if isinstance(save['date'], str) else "Neznámé"
+                    line = f"{i+1}. {save['filename'][:45]:<45} | Kolo {save['round']} | {save['track']}"
+                    txt = self.font.render(line, True, (255, 255, 255))
+                    screen.blit(txt, (520, y + 12))
+
+            # Návod
+            help_text = self.font.render("↑↓ = výběr | ENTER = načíst | ESC = zpět", True, (180, 180, 180))
+            screen.blit(help_text, help_text.get_rect(centerx=960, centery=680))
 
 # trénink
 class PracticeScreen(Screen):
