@@ -940,8 +940,19 @@ class ChampionshipScreen(Screen):
                     if driver.current_lap >= self.current_track["laps"]:
                         driver.finished = True
 
+            # === REÁLNĚJŠÍ OPOTŘEBENÍ PNEUMATIK ===
             wear_rate = PACE[driver.pace_mode]["wear"] * TIRES[driver.tire]["wear"]
-            driver.tire_wear += delta_time * wear_rate * 0.16   # ← zrychlené opotřebení
+            
+            # Základní multiplikátor podle typu gum (reálnější hodnoty)
+            tire_wear_factor = {
+                "SOFT":  2.4,
+                "MEDIUM":1.6,
+                "HARD":  1.0,
+                "INTER": 1.9,
+                "WET":   2.1
+            }.get(driver.tire, 1.6)
+
+            driver.tire_wear += delta_time * wear_rate * tire_wear_factor * 0.095
             driver.tire_wear = min(1.0, driver.tire_wear)
 
             # === PIT STOP LOGIKA ===
