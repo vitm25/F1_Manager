@@ -35,6 +35,7 @@ GAME_STATE_CHAMPIONSHIP = "CHAMPIONSHIP"
 GAME_STATE_PRACTICE = "PRACTICE"
 GAME_STATE_SETTINGS = "SETTINGS"
 GAME_STATE_RACE = "RACE"
+GAME_STATE_PAUSE = "PAUSE"
 game_state = GAME_STATE_MENU
 GAME_STATE_LOAD = "Load"
 
@@ -1011,18 +1012,18 @@ class ChampionshipScreen(Screen):
             behind_pos = behind.current_lap * path_len + behind.track_index + behind.progress
             gap = front_pos - behind_pos
             
-            # Zvětšené okno pro boj + častější předjíždění
-            if 0 < gap < 1.8:
+            # Velké okno pro boj + častější předjíždění
+            if 0 < gap < 2.2:
                 front_speed = get_speed(front, self)
                 behind_speed = get_speed(behind, self)
                 
-                attack_chance = 0.055 * behind.overtake_skill   # zvýšeno
+                attack_chance = 0.065 * behind.overtake_skill
                 if behind.drs_active:
-                    attack_chance *= 2.2
+                    attack_chance *= 2.4
                 
-                if behind_speed > front_speed * 0.96 and random.random() < attack_chance:
+                if behind_speed > front_speed * 0.94 and random.random() < attack_chance:
                     behind.track_index = front.track_index
-                    behind.progress = min(front.progress + 0.12, 0.97)
+                    behind.progress = min(front.progress + 0.15, 0.96)
                     print(f"⚡ {behind.name} předjel {front.name}")
 
     def handle_events(self, events):
@@ -1076,7 +1077,7 @@ class ChampionshipScreen(Screen):
 
                     # Myš na pause a speed tlačítka
                     if self.pause_button and self.pause_button.collidepoint(pos):
-                        self.paused = not self.paused
+                        self.state = "PAUSE"   # otevře pause menu
 
                     for btn in self.speed_buttons:
                         if btn["rect"].collidepoint(pos):
@@ -1084,6 +1085,26 @@ class ChampionshipScreen(Screen):
 
                     if self.race_finished and self.next_race_button and self.next_race_button.collidepoint(pos):
                         self.next_race()
+
+                elif self.state == "PAUSE":
+                    pause_buttons = [   # stejné jako v draw
+                        {"text": "Continue", "rect": pygame.Rect(780, 400, 360, 65), "action": "resume"},
+                        {"text": "Save Game", "rect": pygame.Rect(780, 475, 360, 65), "action": "save"},
+                        {"text": "Main Menu", "rect": pygame.Rect(780, 550, 360, 65), "action": "menu"},
+                        {"text": "Quit Game", "rect": pygame.Rect(780, 625, 360, 65), "action": "quit"}
+                    ]
+                    for btn in pause_buttons:
+                        if btn["rect"].collidepoint(pos):
+                            if btn["action"] == "resume":
+                                self.state = "RACE"
+                            elif btn["action"] == "save":
+                                self.save_game(slot=1)
+                                self.state = "RACE"
+                            elif btn["action"] == "menu":
+                                change_screen(GAME_STATE_MENU)
+                            elif btn["action"] == "quit":
+                                pygame.quit()
+                                sys.exit()
 
                 elif self.state == "SAVE_LIST":
                     if event.type == pygame.KEYDOWN:
@@ -1104,7 +1125,12 @@ class ChampionshipScreen(Screen):
             # ==================== KLÁVESNICOVÉ OVLÁDÁNÍ ====================
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    change_screen(GAME_STATE_MENU)
+                    if self.state == "RACE":
+                        self.state = "PAUSE"          # ESC → Pause menu
+                    elif self.state == "PAUSE":
+                        self.state = "RACE"           # ESC → zpět do hry
+                    else:
+                        change_screen(GAME_STATE_MENU)
 
                 elif event.key == pygame.K_SPACE:
                     self.paused = not self.paused
@@ -1140,6 +1166,10 @@ class ChampionshipScreen(Screen):
                 elif event.key == pygame.K_k:           # K = Seznam uložených her
                     self.show_save_list()
 
+                elif self.state == "PAUSE":
+                    if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
+                        self.state = "RACE"   # Enter/Space = Continue
+
     def draw(self, screen):
         screen.fill((0, 100, 0))
 
@@ -1173,7 +1203,6 @@ class ChampionshipScreen(Screen):
             screen.blit(self.font_big.render(track_name.upper(), True, (255, 215, 0)), 
                         self.font_big.render(track_name.upper(), True, (255, 215, 0)).get_rect(centerx=960, centery=45))
             
-            # Zobrazení zprávy o uložení/načtení
             # Zobrazení zprávy (uložení / načtení)
             if self.save_message_timer > 0:
                 color = (0, 255, 120) if "uložena" in self.save_message.lower() or "načten" in self.save_message.lower() else (255, 200, 100)
@@ -1247,9 +1276,12 @@ class ChampionshipScreen(Screen):
 
             else:
                 # === BĚŽNÝ LEADERBOARD BĚHEM ZÁVODU ===
-                ordered = sorted(self.drivers, key=lambda d: d.current_lap*10000 + d.track_index*100 + d.progress*100, reverse=True)
+                ordered = sorted(self.drivers, 
+                               key=lambda d: d.current_lap * 10000 + d.track_index * 100 + d.progress * 100, 
+                               reverse=True)
+                
                 leader_lap = ordered[0].current_lap if ordered else 0
-                leader_prog = ordered[0].track_index + ordered[0].progress if ordered else 0
+                leader_pos = ordered[0].track_index + ordered[0].progress if ordered else 0
 
                 for i, driver in enumerate(ordered[:20]):
                     rect = pygame.Rect(30, y, 460, 34)
@@ -1264,8 +1296,10 @@ class ChampionshipScreen(Screen):
                         gap_str = f"({driver.total_time:.1f}s)"
                         color = (180, 180, 180)
                     elif driver.current_lap == leader_lap:
-                        gap_raw = (leader_prog - (driver.track_index + driver.progress)) * (85 / len(self.current_track["racing_line"]))
-                        gap_str = f"+{gap_raw:.1f}s"
+                        # Reálnější výpočet rozestupu v sekundách
+                        pos_diff = leader_pos - (driver.track_index + driver.progress)
+                        gap_raw = pos_diff * (88 / len(self.current_track["racing_line"]))  # ~88s na kolo
+                        gap_str = f"+{max(0, gap_raw):.1f}s"
                         color = self.teams.get(driver.team_name, (255,255,255)).color
                     else:
                         laps_down = leader_lap - driver.current_lap
@@ -1462,6 +1496,40 @@ class ChampionshipScreen(Screen):
                 msg = self.font.render(self.save_message, True, color)
                 screen.blit(msg, (960 - msg.get_width()//2, 520))
 
+        elif self.state == "PAUSE":
+            # Tmavé překrytí
+            s = pygame.Surface((WIDTH, HEIGHT))
+            s.set_alpha(190)
+            s.fill((0, 0, 0))
+            screen.blit(s, (0, 0))
+
+            # Okno menu
+            menu_rect = pygame.Rect(720, 260, 480, 460)
+            pygame.draw.rect(screen, (25, 25, 45), menu_rect)
+            pygame.draw.rect(screen, (255, 215, 0), menu_rect, 8)
+
+            title = self.font_big.render("PAUSED", True, (255, 215, 0))
+            screen.blit(title, title.get_rect(centerx=960, centery=320))
+
+            pause_buttons = [
+                {"text": "Continue",     "rect": pygame.Rect(780, 400, 360, 65), "action": "resume"},
+                {"text": "Save Game",    "rect": pygame.Rect(780, 475, 360, 65), "action": "save"},
+                {"text": "Main Menu",    "rect": pygame.Rect(780, 550, 360, 65), "action": "menu"},
+                {"text": "Quit Game",    "rect": pygame.Rect(780, 625, 360, 65), "action": "quit"}
+            ]
+
+            mouse_pos = pygame.mouse.get_pos()
+            for btn in pause_buttons:
+                if btn["rect"].collidepoint(mouse_pos):
+                    color = (255, 215, 0)
+                    text_color = (0, 0, 0)
+                else:
+                    color = (255, 255, 255)
+                    text_color = (255, 255, 255)
+
+                pygame.draw.rect(screen, color, btn["rect"], 4)
+                text = self.font.render(btn["text"], True, text_color)
+                screen.blit(text, text.get_rect(center=btn["rect"].center))
         elif self.state == "SAVE_LIST":
             screen.fill((20, 20, 40))
             title = self.font_big.render("ULOŽENÉ HRY", True, (255, 215, 0))
