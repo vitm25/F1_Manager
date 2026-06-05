@@ -895,7 +895,7 @@ class ChampionshipScreen(Screen):
                         # AI rozhodnutí - pouze pro jezdce, které neovládá hráč
             if (driver != self.player_team.drivers[0] and 
                 driver != self.player_team.drivers[1] and 
-                driver.ai_decision_timer > 1.6):
+                driver.ai_decision_timer > 0.9):
 
                 driver.pace_mode = ai_choose_pace(driver, race_progress, self.current_weather)
                 
@@ -940,19 +940,19 @@ class ChampionshipScreen(Screen):
                     if driver.current_lap >= self.current_track["laps"]:
                         driver.finished = True
 
-            # === REÁLNĚJŠÍ OPOTŘEBENÍ PNEUMATIK ===
-            wear_rate = PACE[driver.pace_mode]["wear"] * TIRES[driver.tire]["wear"]
+            # === OPOTŘEBENÍ PNEUMATIK – VÝRAZNĚ ZVÝŠENO ===
+            base_wear = PACE[driver.pace_mode]["wear"] * TIRES[driver.tire]["wear"]
             
-            # Základní multiplikátor podle typu gum (reálnější hodnoty)
-            tire_wear_factor = {
-                "SOFT":  2.4,
-                "MEDIUM":1.6,
-                "HARD":  1.0,
-                "INTER": 1.9,
-                "WET":   2.1
-            }.get(driver.tire, 1.6)
+            tire_life_factor = {
+                "SOFT":  3.8,      # velmi rychlé opotřebení
+                "MEDIUM":2.4,
+                "HARD":  1.35,
+                "INTER": 2.1,
+                "WET":   1.6
+            }.get(driver.tire, 2.0)
 
-            driver.tire_wear += delta_time * wear_rate * tire_wear_factor * 0.095
+            # Zvýšený multiplikátor pro reálnější degradaci
+            driver.tire_wear += delta_time * base_wear * tire_life_factor * 0.145
             driver.tire_wear = min(1.0, driver.tire_wear)
 
             # === PIT STOP LOGIKA ===
@@ -998,25 +998,31 @@ class ChampionshipScreen(Screen):
                 driver.drs_active = True
 
     def handle_battles(self):
+        if not self.current_track:
+            return
         path_len = len(self.current_track["racing_line"])
         ordered = sorted(self.drivers, key=lambda d: d.current_lap * path_len + d.track_index + d.progress, reverse=True)
         
         for i in range(len(ordered) - 1):
             front = ordered[i]
             behind = ordered[i + 1]
+            
             front_pos = front.current_lap * path_len + front.track_index + front.progress
             behind_pos = behind.current_lap * path_len + behind.track_index + behind.progress
             gap = front_pos - behind_pos
             
-            if 0 < gap < 0.8:
+            # Zvětšené okno pro boj + častější předjíždění
+            if 0 < gap < 1.8:
                 front_speed = get_speed(front, self)
                 behind_speed = get_speed(behind, self)
-                attack_chance = 0.02 * behind.overtake_skill
+                
+                attack_chance = 0.055 * behind.overtake_skill   # zvýšeno
                 if behind.drs_active:
-                    attack_chance *= 1.5
-                if behind_speed > front_speed and random.random() < attack_chance:
+                    attack_chance *= 2.2
+                
+                if behind_speed > front_speed * 0.96 and random.random() < attack_chance:
                     behind.track_index = front.track_index
-                    behind.progress = min(front.progress + 0.05, 0.99)
+                    behind.progress = min(front.progress + 0.12, 0.97)
                     print(f"⚡ {behind.name} předjel {front.name}")
 
     def handle_events(self, events):
@@ -1312,48 +1318,49 @@ class ChampionshipScreen(Screen):
                     pygame.draw.circle(screen, (255,255,255), (int(x), int(y)), size + 3)
                     pygame.draw.circle(screen, color, (int(x), int(y)), size)
 
-            # === BOXY PRO JEZDCE 1 A 2 (uprostřed pod speed buttons, BOX uvnitř černého boxu) ===
+                        # === BOXY PRO JEZDCE 1 A 2 ===
             box_y = 650
             box_w = 380
             box_h = 95
 
-            # Jezdec 1 - celý černý box
+            # Jezdec 1
             d1 = self.player_team.drivers[0]
             wear1 = int(d1.tire_wear * 100)
+
             box1_rect = pygame.Rect(480, box_y, box_w, box_h)
-            pygame.draw.rect(screen, (30, 30, 40), box1_rect)                    # černý background
-            pygame.draw.rect(screen, self.teams[d1.team_name].color, box1_rect, 4)  # barevný rámeček
+            pygame.draw.rect(screen, (30, 30, 40), box1_rect)
+            pygame.draw.rect(screen, self.teams[d1.team_name].color, box1_rect, 4)
 
             screen.blit(self.font.render(f"1. {d1.name}", True, (255,255,255)), (500, box_y + 12))
-            screen.blit(self.font.render(f"Gumy: {d1.tire}", True, (255,215,0)), (500, box_y + 42))
+            screen.blit(self.font.render(f"Gumy: {d1.tire}", True, (255,215,0)), (500, box_y + 38))
             screen.blit(self.font_small.render(f"Opotřebení kol: {wear1}%", True, (255,180,0)), (500, box_y + 68))
 
-            # Tlačítko BOX uvnitř černého boxu (vpravo)
+            # Tlačítko BOX
             self.pit_button1 = pygame.Rect(780, box_y + 18, 75, 60)
             pygame.draw.rect(screen, (200, 60, 60), self.pit_button1)
             pygame.draw.rect(screen, (255,255,255), self.pit_button1, 3)
             screen.blit(self.font.render("BOX", True, (255,255,255)), 
                         self.font.render("BOX", True, (255,255,255)).get_rect(center=self.pit_button1.center))
 
-            # Jezdec 2 - celý černý box
+            # Jezdec 2
             d2 = self.player_team.drivers[1]
             wear2 = int(d2.tire_wear * 100)
+
             box2_rect = pygame.Rect(880, box_y, box_w, box_h)
             pygame.draw.rect(screen, (30, 30, 40), box2_rect)
             pygame.draw.rect(screen, self.teams[d2.team_name].color, box2_rect, 4)
 
             screen.blit(self.font.render(f"2. {d2.name}", True, (255,255,255)), (900, box_y + 12))
-            screen.blit(self.font.render(f"Gumy: {d2.tire}", True, (255,215,0)), (900, box_y + 42))
+            screen.blit(self.font.render(f"Gumy: {d2.tire}", True, (255,215,0)), (900, box_y + 38))
             screen.blit(self.font_small.render(f"Opotřebení kol: {wear2}%", True, (255,180,0)), (900, box_y + 68))
 
-            # Tlačítko BOX uvnitř černého boxu (vpravo)
+            # Tlačítko BOX
             self.pit_button2 = pygame.Rect(1180, box_y + 18, 75, 60)
             pygame.draw.rect(screen, (200, 60, 60), self.pit_button2)
             pygame.draw.rect(screen, (255,255,255), self.pit_button2, 3)
             screen.blit(self.font.render("BOX", True, (255,255,255)), 
                         self.font.render("BOX", True, (255,255,255)).get_rect(center=self.pit_button2.center))
-
-
+            
             # === PAUSE + SPEED BUTTONS (dole uprostřed) ===
             btn_y = 580
             btn_width = 90
