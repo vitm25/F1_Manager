@@ -13,8 +13,12 @@ print("Dostupné tratě:")
 for track in tracks:
     print(f"  - {track['name']}")
 
-WIDTH = 1920
-HEIGHT = 1080
+# Globální nastavení
+CURRENT_FPS = 60
+IS_FULLSCREEN = False
+
+WIDTH = 1280
+HEIGHT = 720
 barvy_pozadi = (0, 0, 0,)
 FPS = 60
 RACE_ARE_WIDTH = 650
@@ -268,14 +272,14 @@ class Screen:
     
 class MenuScreen(Screen):
     def __init__(self):
-        self.font = pygame.font.SysFont("arial", 28)
-        self.font_big = pygame.font.SysFont("arial", 48)
+        self.font = pygame.font.SysFont("arial", 28, bold=True)
+        self.font_big = pygame.font.SysFont("arial", 52, bold=True)
 
         self.buttons = [
-            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(800, 340, 320, 65), "action": GAME_STATE_RACE},
-            {"text": "PRACTICE",     "rect": pygame.Rect(800, 420, 320, 65), "action": GAME_STATE_PRACTICE},
-            {"text": "SETTINGS",     "rect": pygame.Rect(800, 500, 320, 65), "action": GAME_STATE_SETTINGS},
-            {"text": "VYPNOUT",      "rect": pygame.Rect(800, 580, 320, 65), "action": "QUIT"}
+            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(760, 340, 400, 70), "action": GAME_STATE_RACE},
+            {"text": "PRACTICE",     "rect": pygame.Rect(760, 425, 400, 70), "action": GAME_STATE_PRACTICE},
+            {"text": "SETTINGS",     "rect": pygame.Rect(760, 510, 400, 70), "action": GAME_STATE_SETTINGS},
+            {"text": "VYPNOUT",      "rect": pygame.Rect(760, 595, 400, 70), "action": "QUIT"}
         ]
 
     def handle_events(self, events):
@@ -292,29 +296,46 @@ class MenuScreen(Screen):
                             change_screen(btn["action"])
 
     def draw(self, screen):
-        # Tmavší, ale viditelnější pozadí (F1 styl)
-        screen.fill((20, 20, 40))  
+        # Futuristické carbon + gradient přes celou výšku
+        screen.fill((7, 7, 17))   # velmi tmavé pozadí
 
-        # Nadpis - velký a bílý
-        title = self.font_big.render("F1 MANAGER", True, (255, 255, 255))
-        screen.blit(title, title.get_rect(centerx=960, centery=220))
+        # Gradient přes celou obrazovku (tmavě fialovo-červený → černý)
+        for i in range(HEIGHT):
+            # Čím níže, tím tmavší
+            intensity = int(28 * (1 - i / HEIGHT))
+            color = (intensity + 8, max(0, intensity - 18), intensity + 12)
+            pygame.draw.line(screen, color, (0, i), (WIDTH, i))
+
+        # Tenký světlejší horizontální pruh nahoře (jako F1 broadcast)
+        pygame.draw.rect(screen, (35, 0, 25), (0, 0, WIDTH, 280), border_radius=0)
+
+        # Hlavní nadpis
+        title = self.font_big.render("F1 MANAGER", True, (255, 215, 0))
+        screen.blit(title, title.get_rect(centerx=960, centery=205))
+
+        # Podnadpis
+        subtitle = self.font.render("2025 SEASON", True, (180, 180, 210))
+        screen.blit(subtitle, subtitle.get_rect(centerx=960, centery=265))
 
         mouse_pos = pygame.mouse.get_pos()
         
         for btn in self.buttons:
-            # Hover efekt
-            if btn["rect"].collidepoint(mouse_pos):
-                border_color = (255, 215, 0)   # žlutý rámeček při najetí
+            hovered = btn["rect"].collidepoint(mouse_pos)
+            
+            # Button
+            if hovered:
+                pygame.draw.rect(screen, (45, 45, 70), btn["rect"])
+                border_color = (255, 215, 0)
                 text_color = (255, 215, 0)
             else:
-                border_color = (255, 255, 255)
-                text_color = (255, 255, 255)   # bílý text
+                pygame.draw.rect(screen, (22, 22, 38), btn["rect"])
+                border_color = (200, 200, 210)
+                text_color = (240, 240, 255)
 
-            # Vykreslení tlačítka
-            pygame.draw.rect(screen, (40, 40, 70), btn["rect"])           # tmavý vnitřek
-            pygame.draw.rect(screen, border_color, btn["rect"], 4)        # bílý/žlutý rámeček
+            # Rámeček
+            pygame.draw.rect(screen, border_color, btn["rect"], 5)
 
-            # Bílý text
+            # Text
             text = self.font.render(btn["text"], True, text_color)
             screen.blit(text, text.get_rect(center=btn["rect"].center))
 
@@ -544,6 +565,8 @@ class ChampionshipScreen(Screen):
 
         self.save_list = []
         self.selected_save_index = 0
+
+        self.show_ingame_menu = False
 
     def _initialize_championship(self):
         self.teams = {}
@@ -1027,9 +1050,21 @@ class ChampionshipScreen(Screen):
                     print(f"⚡ {behind.name} předjel {front.name}")
 
     def handle_events(self, events):
+        global CURRENT_FPS, IS_FULLSCREEN
+
         for event in events:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 pos = pygame.mouse.get_pos()
+
+                if self.show_ingame_menu:
+                    # In-game menu kliky
+                    if hasattr(self, 'continue_rect') and self.continue_rect.collidepoint(pos):
+                        self.show_ingame_menu = False
+                    elif hasattr(self, 'settings_rect') and self.settings_rect.collidepoint(pos):
+                        change_screen(GAME_STATE_SETTINGS)
+                    elif hasattr(self, 'quit_rect') and self.quit_rect.collidepoint(pos):
+                        change_screen(GAME_STATE_MENU)
+                    return
 
                 if self.state == "TEAM_SELECT":
                     for i, (team_name, team) in enumerate(self.teams.items()):
@@ -1126,9 +1161,7 @@ class ChampionshipScreen(Screen):
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     if self.state == "RACE":
-                        self.state = "PAUSE"          # ESC → Pause menu
-                    elif self.state == "PAUSE":
-                        self.state = "RACE"           # ESC → zpět do hry
+                        self.show_ingame_menu = not self.show_ingame_menu
                     else:
                         change_screen(GAME_STATE_MENU)
 
@@ -1171,7 +1204,34 @@ class ChampionshipScreen(Screen):
                         self.state = "RACE"   # Enter/Space = Continue
 
     def draw(self, screen):
-        screen.fill((0, 100, 0))
+        # F1 carbon dark background
+        screen.fill((12, 12, 22))
+
+        # === IN-GAME MENU ===
+        if self.show_ingame_menu:
+            overlay = pygame.Rect(340, 180, 600, 360)
+            pygame.draw.rect(screen, (10, 10, 25), overlay)
+            pygame.draw.rect(screen, (255, 215, 0), overlay, 5)
+
+            title = self.font_big.render("MENU", True, (255, 215, 0))
+            screen.blit(title, title.get_rect(centerx=640, centery=230))
+
+            # Tlačítka
+            self.continue_rect = pygame.Rect(440, 300, 400, 60)
+            self.settings_rect = pygame.Rect(440, 380, 400, 60)
+            self.quit_rect = pygame.Rect(440, 460, 400, 60)
+
+            for rect, text in [(self.continue_rect, "POKRAČOVAT"), 
+                                (self.settings_rect, "NASTAVENÍ"), 
+                                (self.quit_rect, "HLAVNÍ MENU")]:
+                hovered = rect.collidepoint(pygame.mouse.get_pos())
+                color = (50, 50, 80) if hovered else (25, 25, 45)
+                pygame.draw.rect(screen, color, rect)
+                pygame.draw.rect(screen, (255, 215, 0), rect, 3)
+                txt = self.font.render(text, True, (255, 255, 255))
+                screen.blit(txt, txt.get_rect(center=rect.center))
+            
+            return   # nezobrazujeme zbytek hry při otevřeném menu
 
         if self.state == "TEAM_SELECT":
             screen.blit(self.font_big.render("VYBERTE SVŮJ TÝM", True, (255, 215, 0)), (720, 120))
@@ -1191,22 +1251,22 @@ class ChampionshipScreen(Screen):
             screen.blit(txt, txt.get_rect(center=self.start_season_button.center))
 
         elif self.state == "RACE":
-            # Horní informace
+            # Horní informace - F1 styl
             current_lap = max((d.current_lap for d in self.drivers), default=0)
             track_name = self.current_track["name"] if self.current_track else "?"
 
-            screen.blit(self.font_big.render(f"Kolo {current_lap}/{self.current_track['laps']}", True, (255, 255, 100)), (40, 25))
-            screen.blit(self.font.render(f"Čas: {self.race_time:.1f}s", True, (255, 255, 255)), (40, 65))
-            screen.blit(self.font.render(f"Počasí: {self.current_weather}", True, (255, 255, 0)), (40, 95))
+            screen.blit(self.font_big.render(f"Kolo {current_lap}/{self.current_track['laps']}", True, (255, 215, 0)), (40, 25))
+            screen.blit(self.font.render(f"Čas: {self.race_time:.1f}s", True, (255, 255, 255)), (40, 68))
+            screen.blit(self.font.render(f"Počasí: {self.current_weather}", True, (100, 255, 255)), (40, 98))
 
             # Název trati uprostřed
             screen.blit(self.font_big.render(track_name.upper(), True, (255, 215, 0)), 
                         self.font_big.render(track_name.upper(), True, (255, 215, 0)).get_rect(centerx=960, centery=45))
             
-            # Zobrazení zprávy (uložení / načtení)
+            # Zpráva o uložení / načtení
             if self.save_message_timer > 0:
-                color = (0, 255, 120) if "uložena" in self.save_message.lower() or "načten" in self.save_message.lower() else (255, 200, 100)
-                msg = self.font.render(self.save_message, True, color)
+                color = (0, 255, 140) if any(x in self.save_message.lower() for x in ["ulož", "načten"]) else (255, 100, 100)
+                msg = self.font_big.render(self.save_message, True, color)
                 screen.blit(msg, (960 - msg.get_width()//2, 520))
 
             # === PODIUM (zobrazí se po skončení závodu) ===
@@ -1572,19 +1632,90 @@ class PracticeScreen(Screen):
                     change_screen(GAME_STATE_MENU)
 # nastavení        
 class SettingsScreen(Screen):
-    def draw(self, screen):
-        screen.fill((100,0,0))
-        
-    # updaty
-    def update(self, delta_time):
-        pass
+    def __init__(self):
+        self.font = pygame.font.SysFont("arial", 28)
+        self.font_big = pygame.font.SysFont("arial", 42)
+        self.font_small = pygame.font.SysFont("arial", 24)
 
-    # eventy
+        self.fps_options = [30, 60, 90, 120, 144, 240]
+        self.current_fps_index = self.fps_options.index(CURRENT_FPS) if CURRENT_FPS in self.fps_options else 1
+
+        self.fullscreen_rect = None
+        self.fps_buttons = []
+
     def handle_events(self, events):
+        global CURRENT_FPS, IS_FULLSCREEN
+
         for event in events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     change_screen(GAME_STATE_MENU)
+
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                pos = pygame.mouse.get_pos()
+
+                # Přepínání Fullscreen / Windowed
+                if self.fullscreen_rect and self.fullscreen_rect.collidepoint(pos):
+                    IS_FULLSCREEN = not IS_FULLSCREEN
+                    if IS_FULLSCREEN:
+                        pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
+                    else:
+                        pygame.display.set_mode((WIDTH, HEIGHT))
+                    print(f"Fullscreen: {IS_FULLSCREEN}")
+
+                # Výběr FPS
+                for i, btn in enumerate(self.fps_buttons):
+                    if btn.collidepoint(pos):
+                        self.current_fps_index = i
+                        CURRENT_FPS = self.fps_options[i]
+                        clock.tick(CURRENT_FPS)  # okamžitá změna
+                        print(f"FPS nastaveno na: {CURRENT_FPS}")
+
+    def draw(self, screen):
+        screen.fill((12, 12, 25))  # tmavé F1 pozadí
+
+        # Nadpis
+        title = self.font_big.render("NASTAVENÍ", True, (255, 215, 0))
+        screen.blit(title, title.get_rect(centerx=960, centery=120))
+
+        # === FPS ===
+        fps_title = self.font.render("FRAMERATE (FPS)", True, (200, 200, 220))
+        screen.blit(fps_title, (580, 220))
+
+        self.fps_buttons = []
+        for i, fps in enumerate(self.fps_options):
+            x = 580 + i * 110
+            rect = pygame.Rect(x, 270, 95, 55)
+            self.fps_buttons.append(rect)
+
+            if fps == CURRENT_FPS:
+                color = (255, 215, 0)
+                border = 5
+            else:
+                color = (40, 40, 60)
+                border = 3
+
+            pygame.draw.rect(screen, color, rect)
+            pygame.draw.rect(screen, (255, 255, 255), rect, border)
+
+            txt = self.font.render(str(fps), True, (255, 255, 255))
+            screen.blit(txt, txt.get_rect(center=rect.center))
+
+        # === Fullscreen ===
+        fs_title = self.font.render("REŽIM OBRAZOVKY", True, (200, 200, 220))
+        screen.blit(fs_title, (580, 380))
+
+        self.fullscreen_rect = pygame.Rect(580, 430, 500, 60)
+        fs_color = (0, 180, 80) if IS_FULLSCREEN else (70, 70, 90)
+        pygame.draw.rect(screen, fs_color, self.fullscreen_rect)
+        pygame.draw.rect(screen, (255, 255, 255), self.fullscreen_rect, 4)
+
+        fs_text = self.font.render("FULLSCREEN" if IS_FULLSCREEN else "OKNO", True, (255, 255, 255))
+        screen.blit(fs_text, fs_text.get_rect(center=self.fullscreen_rect.center))
+
+        # Návod
+        back = self.font_small.render("ESC = zpět do menu", True, (160, 160, 180))
+        screen.blit(back, (780, 650))
         
 #změna okna
 current_screen = None
