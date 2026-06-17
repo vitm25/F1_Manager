@@ -17,6 +17,65 @@ for track in tracks:
 CURRENT_FPS = 60
 IS_FULLSCREEN = False
 
+pygame.mixer.init()
+
+# Globální nastavení závodu a jazyka
+CURRENT_RACE_MODE = "SHORT"
+CURRENT_LANGUAGE = "CS"
+
+# Race phases
+RACE_PHASE_FORMATION = "FORMATION"
+RACE_PHASE_START = "START"
+RACE_PHASE_RACING = "RACING"
+
+# Cesty k audio komentářům
+START_COMMENT_CS = "sounds/start_cs.mp3"
+START_COMMENT_EN = "sounds/start_en.mp3"
+
+# === LOKALIZACE - SNADNO ROZŠIŘITELNÁ ===
+TEXTS = {
+    # Hlavní menu a nastavení
+    "F1 MANAGER": {"CS": "F1 MANAGER", "EN": "F1 MANAGER", "IT": "F1 MANAGER"},
+    "2025 SEASON": {"CS": "2025 SEZÓNA", "EN": "2025 SEASON", "IT": "STAGIONE 2025"},
+    "CHAMPIONSHIP": {"CS": "ŠAMPIONÁT", "EN": "CHAMPIONSHIP", "IT": "CAMPIONATO"},
+    "PRACTICE": {"CS": "TRÉNINK", "EN": "PRACTICE", "IT": "ALLENAMENTO"},
+    "SETTINGS": {"CS": "NASTAVENÍ", "EN": "SETTINGS", "IT": "IMPOSTAZIONI"},
+    "VYPNOUT": {"CS": "VYPNOUT", "EN": "QUIT", "IT": "SPEGNERE"},
+
+    # In-game menu
+    "PAUSED": {"CS": "PAUSED", "EN": "PAUSED"},
+    "POKRAČOVAT": {"CS": "POKRAČOVAT", "EN": "CONTINUE"},
+    "ULOŽIT HRU": {"CS": "ULOŽIT HRU", "EN": "SAVE GAME"},
+    "NAČÍST HRU": {"CS": "NAČÍST HRU", "EN": "LOAD GAME"},
+    "NASTAVENÍ": {"CS": "NASTAVENÍ", "EN": "SETTINGS"},
+    "NÁVRAT DO MENU": {"CS": "NÁVRAT DO MENU", "EN": "MAIN MENU"},
+    "UKONČIT HRU": {"CS": "UKONČIT HRU", "EN": "QUIT GAME"},
+
+    # Závod
+    "Kolo": {"CS": "Kolo", "EN": "Lap"},
+    "Čas:": {"CS": "Čas:", "EN": "Time:"},
+    "Počasí:": {"CS": "Počasí:", "EN": "Weather:"},
+    "Gumy:": {"CS": "Gumy:", "EN": "Tires:"},
+    "Opotřebení kol:": {"CS": "Opotřebení kol:", "EN": "Tire Wear:"},
+    "FORMATION LAP": {"CS": "FORMACE KOLO", "EN": "FORMATION LAP"},
+    "LIGHTS OUT...": {"CS": "SVĚTLA ZHASLA...", "EN": "LIGHTS OUT..."},
+    "VYBERTE SVŮJ TÝM": {"CS": "VYBERTE SVŮJ TÝM", "EN": "CHOOSE YOUR TEAM"},
+    "Váš tým:": {"CS": "Váš tým:", "EN": "Your team:"},
+    "ZAČÁTEK SEZÓNY": {"CS": "ZAČÁTEK SEZÓNY", "EN": "START SEASON"},
+
+    # Nastavení
+    "DÉLKA ZÁVODU": {"CS": "DÉLKA ZÁVODU", "EN": "RACE LENGTH"},
+    "SHORT RACE": {"CS": "SHORT RACE", "EN": "SHORT RACE"},
+    "FULL RACE (1h30+)": {"CS": "FULL RACE (1h30+)", "EN": "FULL RACE (1h30+)"},
+    "JAZYK": {"CS": "JAZYK", "EN": "LANGUAGE"},
+    "FRAMERATE (FPS)": {"CS": "FRAMERATE (FPS)", "EN": "FRAMERATE (FPS)"},
+}
+
+def get_text(key, lang=None):
+    if lang is None:
+        lang = CURRENT_LANGUAGE
+    return TEXTS.get(key, {}).get(lang, key)
+
 WIDTH = 1920
 HEIGHT = 1080
 barvy_pozadi = (0, 0, 0,)
@@ -569,6 +628,10 @@ class ChampionshipScreen(Screen):
 
         self.show_ingame_menu = False
 
+        self.race_phase = RACE_PHASE_FORMATION
+        self.formation_lap_completed = False
+        self.start_audio_played = False
+
     def _initialize_championship(self):
         self.teams = {}
         self.drivers = []
@@ -619,6 +682,14 @@ class ChampionshipScreen(Screen):
             print(f"Chyba načtení mapy: {e}")
             self.track_image = None
 
+        # Race length logic
+        if CURRENT_RACE_MODE == "FULL":
+            print(f"Full race mode - {self.current_track['laps']} kol")
+        else:
+            if self.current_track:
+                self.current_track["laps"] = max(10, self.current_track["laps"] // 2)
+            print("Short race mode")
+
         for driver in self.drivers:
             driver.track_index = 0
             driver.progress = 0.0
@@ -647,6 +718,15 @@ class ChampionshipScreen(Screen):
         self.safety_car_active = False
         self.vsc_active = False
         self.yellow_flag_active = False
+
+        # === NOVÉ: Formation Lap ===
+        self.race_phase = RACE_PHASE_FORMATION
+        self.formation_lap_completed = False
+        self.start_audio_played = False
+        # Test zvuku
+        print(f"Audio paths: CS={START_COMMENT_CS}, EN={START_COMMENT_EN}")
+
+        print("🏁 Formation lap started")
 
     def finish_race(self):
         if self.race_finished:
@@ -863,6 +943,8 @@ class ChampionshipScreen(Screen):
         self.save_list = self.list_saves()
         self.selected_save_index = 0
         self.state = "SAVE_LIST"
+        self.show_ingame_menu = False   # zavře in-game menu
+        self.paused = True
 
     def update(self, delta_time):
         if self.paused or not self.current_track or self.race_finished:
@@ -873,6 +955,10 @@ class ChampionshipScreen(Screen):
         
         delta_time *= self.time_scale
         self.race_time += delta_time
+
+        # === FORMATION LAP LOGIKA ===
+        if self.race_phase == RACE_PHASE_FORMATION:
+            formation_speed_multiplier = 0.45
 
         # Počasí
         self.weather_timer += delta_time
@@ -906,11 +992,17 @@ class ChampionshipScreen(Screen):
 
         path = self.current_track["racing_line"]
         path_len = len(path)
+
         race_progress = max((d.current_lap for d in self.drivers if not d.finished), default=0) / self.current_track["laps"]
 
         for driver in self.drivers:
             if driver.finished or driver.is_dnf:
                 continue
+
+            # === Rychlost podle fáze ===
+            speed_multiplier = 1.0
+            if self.race_phase == RACE_PHASE_FORMATION:
+                speed_multiplier = 0.45
 
             driver.ai_decision_timer += delta_time
 
@@ -953,7 +1045,7 @@ class ChampionshipScreen(Screen):
             if self.safety_car_active:
                 speed *= 0.52
 
-            driver.progress += speed * delta_time
+            driver.progress += speed * delta_time * speed_multiplier
 
             while driver.progress >= 1.0:
                 driver.progress -= 1.0
@@ -962,8 +1054,11 @@ class ChampionshipScreen(Screen):
                 if driver.track_index == 0:
                     driver.current_lap += 1
                     driver.total_time = self.race_time
-                    if driver.current_lap >= self.current_track["laps"]:
-                        driver.finished = True
+                    
+                    if self.race_phase == RACE_PHASE_FORMATION and driver.current_lap >= 1:
+                        self.formation_lap_completed = True
+                        self.race_phase = RACE_PHASE_START
+                        print("✅ Formation lap completed - starting the race!")
 
             # === OPOTŘEBENÍ PNEUMATIK – VÝRAZNĚ ZVÝŠENO ===
             base_wear = PACE[driver.pace_mode]["wear"] * TIRES[driver.tire]["wear"]
@@ -1005,6 +1100,24 @@ class ChampionshipScreen(Screen):
                     driver.progress = 0.3   # trochu vpřed, aby nevznikaly kolize
                     
                     print(f"✓ {driver.name} dokončil pit stop → {driver.tire}")
+
+        # === START AUDIO + TEXT ===
+        if self.race_phase == RACE_PHASE_START and not self.start_audio_played:
+            self.start_audio_played = True
+            try:
+                if CURRENT_LANGUAGE == "CS" and os.path.exists(START_COMMENT_CS):
+                    pygame.mixer.music.load(START_COMMENT_CS)
+                    print("▶️ Přehrávám český start komentář")
+                elif os.path.exists(START_COMMENT_EN):
+                    pygame.mixer.music.load(START_COMMENT_EN)
+                    print("▶️ Playing English start comment")
+                else:
+                    print("⚠️ Audio soubory nenalezeny v 'sounds/' složce")
+                pygame.mixer.music.play()
+            except Exception as e:
+                print(f"❌ Chyba při přehrávání audia: {e}")
+
+            self.race_phase = RACE_PHASE_RACING
 
         self.update_drs()
         self.handle_battles()
@@ -1061,6 +1174,7 @@ class ChampionshipScreen(Screen):
                     if hasattr(self, 'continue_rect') and self.continue_rect.collidepoint(pos):
                         self.show_ingame_menu = False
                         self.paused = False
+                        self.state = "RACE"          # ← důležitý reset
                     elif hasattr(self, 'save_rect') and self.save_rect.collidepoint(pos):
                         self.save_game(slot=1)
                     elif hasattr(self, 'load_rect') and self.load_rect.collidepoint(pos):
@@ -1130,19 +1244,27 @@ class ChampionshipScreen(Screen):
                     if event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_ESCAPE:
                             self.state = "RACE"
-                            self.show_ingame_menu = False
+                            self.show_ingame_menu = False   # důležité
+                            self.paused = False
                         elif event.key == pygame.K_UP and self.save_list:
                             self.selected_save_index = max(0, self.selected_save_index - 1)
                         elif event.key == pygame.K_DOWN and self.save_list:
                             self.selected_save_index = min(len(self.save_list)-1, self.selected_save_index + 1)
                         elif event.key == pygame.K_RETURN and self.save_list:
-                            self.load_game(slot=1)   # načte nejnovější
+                            self.load_game(slot=1)
                             self.state = "RACE"
                             self.show_ingame_menu = False
+                            self.paused = False
+
             # ==================== KLÁVESNICOVÉ OVLÁDÁNÍ ====================
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     if self.show_ingame_menu:
+                        self.show_ingame_menu = False
+                        self.paused = False
+                        self.state = "RACE"          # ← důležitý reset
+                    elif self.state == "SAVE_LIST":
+                        self.state = "RACE"
                         self.show_ingame_menu = False
                         self.paused = False
                     else:
@@ -1232,7 +1354,7 @@ class ChampionshipScreen(Screen):
             return
         
         if self.state == "TEAM_SELECT":
-            screen.blit(self.font_big.render("VYBERTE SVŮJ TÝM", True, (255, 215, 0)), (720, 120))
+            screen.blit(self.font_big.render(get_text("VYBERTE SVŮJ TÝM"), True, (255, 215, 0)), (720, 120))
             for i, (team_name, team) in enumerate(self.teams.items()):
                 rect = pygame.Rect(720, 180 + i*75, 520, 70)
                 pygame.draw.rect(screen, team.color, rect)
@@ -1241,11 +1363,11 @@ class ChampionshipScreen(Screen):
                 screen.blit(txt, txt.get_rect(center=rect.center))
 
         elif self.state == "SEASON_START":
-            screen.blit(self.font_big.render(f"Váš tým: {self.player_team.name}", True, self.player_team.color), (720, 300))
+            screen.blit(self.font_big.render(f"{get_text('Váš tým:')} {self.player_team.name}", True, self.player_team.color), (720, 300))
             self.start_season_button = pygame.Rect(760, 480, 400, 80)
             pygame.draw.rect(screen, (0, 180, 80), self.start_season_button)
             pygame.draw.rect(screen, (255,255,255), self.start_season_button, 4)
-            txt = self.font_big.render("ZAČÁTEK SEZÓNY", True, (255,255,255))
+            txt = self.font_big.render(get_text("ZAČÁTEK SEZÓNY"), True, (255,255,255))
             screen.blit(txt, txt.get_rect(center=self.start_season_button.center))
 
         elif self.state == "RACE":
@@ -1253,9 +1375,17 @@ class ChampionshipScreen(Screen):
             current_lap = max((d.current_lap for d in self.drivers), default=0)
             track_name = self.current_track["name"] if self.current_track else "?"
 
-            screen.blit(self.font_big.render(f"Kolo {current_lap}/{self.current_track['laps']}", True, (255, 215, 0)), (40, 25))
-            screen.blit(self.font.render(f"Čas: {self.race_time:.1f}s", True, (255, 255, 255)), (40, 68))
-            screen.blit(self.font.render(f"Počasí: {self.current_weather}", True, (100, 255, 255)), (40, 98))
+            screen.blit(self.font_big.render(f"{get_text('Kolo')} {current_lap}/{self.current_track['laps']}", True, (255, 215, 0)), (40, 25))
+            screen.blit(self.font.render(f"{get_text('Čas:')} {self.race_time:.1f}s", True, (255, 255, 255)), (40, 68))
+            screen.blit(self.font.render(f"{get_text('Počasí:')} {self.current_weather}", True, (100, 255, 255)), (40, 98))
+
+            # Zobrazení fáze závodu
+            if self.race_phase == RACE_PHASE_FORMATION:
+                phase_text = self.font_big.render(get_text("FORMATION LAP"), True, (255, 100, 0))
+                screen.blit(phase_text, (40, 130))
+            elif self.race_phase == RACE_PHASE_START:
+                phase_text = self.font_big.render(get_text("LIGHTS OUT..."), True, (255, 215, 0))
+                screen.blit(phase_text, (40, 130))
 
             # Název trati uprostřed
             screen.blit(self.font_big.render(track_name.upper(), True, (255, 215, 0)), 
@@ -1424,8 +1554,8 @@ class ChampionshipScreen(Screen):
             pygame.draw.rect(screen, self.teams[d1.team_name].color, box1_rect, 4)
 
             screen.blit(self.font.render(f"1. {d1.name}", True, (255,255,255)), (500, box_y + 12))
-            screen.blit(self.font.render(f"Gumy: {d1.tire}", True, (255,215,0)), (500, box_y + 38))
-            screen.blit(self.font_small.render(f"Opotřebení kol: {wear1}%", True, (255,180,0)), (500, box_y + 68))
+            screen.blit(self.font.render(f"{get_text('Gumy:')} {d1.tire}", True, (255,215,0)), (500, box_y + 38))
+            screen.blit(self.font_small.render(f"{get_text('Opotřebení kol:')} {wear1}%", True, (255,180,0)), (500, box_y + 68))
 
             # Tlačítko BOX
             self.pit_button1 = pygame.Rect(780, box_y + 18, 75, 60)
@@ -1443,8 +1573,8 @@ class ChampionshipScreen(Screen):
             pygame.draw.rect(screen, self.teams[d2.team_name].color, box2_rect, 4)
 
             screen.blit(self.font.render(f"2. {d2.name}", True, (255,255,255)), (900, box_y + 12))
-            screen.blit(self.font.render(f"Gumy: {d2.tire}", True, (255,215,0)), (900, box_y + 38))
-            screen.blit(self.font_small.render(f"Opotřebení kol: {wear2}%", True, (255,180,0)), (900, box_y + 68))
+            screen.blit(self.font.render(f"{get_text('Gumy:')} {d2.tire}", True, (255,215,0)), (900, box_y + 38))
+            screen.blit(self.font_small.render(f"{get_text('Opotřebení kol:')} {wear2}%", True, (255,180,0)), (900, box_y + 68))
 
             # Tlačítko BOX
             self.pit_button2 = pygame.Rect(1180, box_y + 18, 75, 60)
@@ -1598,7 +1728,6 @@ class PracticeScreen(Screen):
                     change_screen(GAME_STATE_MENU)
 # nastavení        
 class SettingsScreen(Screen):
-
     def __init__(self):
         self.font = pygame.font.SysFont("arial", 28)
         self.font_big = pygame.font.SysFont("arial", 42)
@@ -1609,88 +1738,103 @@ class SettingsScreen(Screen):
 
         self.fullscreen_rect = None
         self.fps_buttons = []
-        
-    # updaty
-    def update(self, delta_time):
-        pass
+        self.race_mode_buttons = []
+        self.language_buttons = []
 
-    # eventy
+        self.race_modes = ["SHORT", "FULL"]
+        self.current_race_mode_index = 0 if CURRENT_RACE_MODE == "SHORT" else 1
+
+        self.languages = ["ČEŠTINA", "ENGLISH", "ITALIANO"]
+        self.current_language_index = 0 if CURRENT_LANGUAGE == "CS" else 1 # CS, EN, DE
+
+        self.from_ingame = False
+
     def handle_events(self, events):
-        global CURRENT_FPS, IS_FULLSCREEN
+        global CURRENT_FPS, IS_FULLSCREEN, CURRENT_RACE_MODE, CURRENT_LANGUAGE
 
         for event in events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    change_screen(GAME_STATE_MENU)
+                    if self.from_ingame:
+                        change_screen(GAME_STATE_RACE)
+                    else:
+                        change_screen(GAME_STATE_MENU)
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 pos = pygame.mouse.get_pos()
 
-                # Přepínání Fullscreen / Windowed
                 if self.fullscreen_rect and self.fullscreen_rect.collidepoint(pos):
                     IS_FULLSCREEN = not IS_FULLSCREEN
-                    if IS_FULLSCREEN:
-                        pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
-                    else:
-                        pygame.display.set_mode((WIDTH, HEIGHT))
-                    print(f"Fullscreen: {IS_FULLSCREEN}")
+                    flags = pygame.FULLSCREEN if IS_FULLSCREEN else 0
+                    pygame.display.set_mode((WIDTH, HEIGHT), flags)
 
-                # Výběr FPS
                 for i, btn in enumerate(self.fps_buttons):
                     if btn.collidepoint(pos):
                         self.current_fps_index = i
                         CURRENT_FPS = self.fps_options[i]
-                        clock.tick(CURRENT_FPS)  # okamžitá změna
-                        print(f"FPS nastaveno na: {CURRENT_FPS}")
-    
-    def draw(self, screen):
-        screen.fill((12, 12, 25))  # tmavé F1 pozadí
+                        clock.tick(CURRENT_FPS)
 
-        # Nadpis
-        title = self.font_big.render("NASTAVENÍ", True, (255, 215, 0))
+                for i, rect in enumerate(self.race_mode_buttons):
+                    if rect.collidepoint(pos):
+                        self.current_race_mode_index = i
+                        CURRENT_RACE_MODE = self.race_modes[i]
+
+                for i, rect in enumerate(self.language_buttons):
+                    if rect.collidepoint(pos):
+                        self.current_language_index = i
+                        CURRENT_LANGUAGE = "CS" if i == 0 else "EN"
+
+    def draw(self, screen):
+        screen.fill((12, 12, 25))
+
+        title = self.font_big.render(get_text("NASTAVENÍ"), True, (255, 215, 0))
         screen.blit(title, title.get_rect(centerx=960, centery=120))
 
-        # === FPS ===
-        fps_title = self.font.render("FRAMERATE (FPS)", True, (200, 200, 220))
-        screen.blit(fps_title, (580, 220))
-
+        # FPS
+        fps_title = self.font.render(get_text("FRAMERATE (FPS)"), True, (200, 200, 220))
+        screen.blit(fps_title, (580, 200))
         self.fps_buttons = []
         for i, fps in enumerate(self.fps_options):
             x = 580 + i * 110
-            rect = pygame.Rect(x, 270, 95, 55)
+            rect = pygame.Rect(x, 250, 95, 55)
             self.fps_buttons.append(rect)
-
-            if fps == CURRENT_FPS:
-                color = (255, 215, 0)
-                border = 5
-            else:
-                color = (40, 40, 60)
-                border = 3
-
+            color = (255, 215, 0) if fps == CURRENT_FPS else (40, 40, 60)
             pygame.draw.rect(screen, color, rect)
-            pygame.draw.rect(screen, (255, 255, 255), rect, border)
-
+            pygame.draw.rect(screen, (255, 255, 255), rect, 4 if fps == CURRENT_FPS else 2)
             txt = self.font.render(str(fps), True, (255, 255, 255))
             screen.blit(txt, txt.get_rect(center=rect.center))
 
-        # === Fullscreen ===
-        fs_title = self.font.render("REŽIM OBRAZOVKY", True, (200, 200, 220))
-        screen.blit(fs_title, (580, 380))
+        # Race Mode
+        mode_title = self.font.render(get_text("DÉLKA ZÁVODU"), True, (200, 200, 220))
+        screen.blit(mode_title, (580, 340))
+        self.race_mode_buttons = []
+        for i, mode in enumerate(self.race_modes):
+            x = 580 + i * 320
+            rect = pygame.Rect(x, 390, 280, 60)
+            self.race_mode_buttons.append(rect)
+            color = (255, 215, 0) if i == self.current_race_mode_index else (40, 40, 60)
+            pygame.draw.rect(screen, color, rect)
+            pygame.draw.rect(screen, (255, 255, 255), rect, 4 if i == self.current_race_mode_index else 2)
+            txt_text = "SHORT RACE" if mode == "SHORT" else "FULL RACE (1h30+)"
+            txt = self.font.render(txt_text, True, (255, 255, 255))
+            screen.blit(txt, txt.get_rect(center=rect.center))
 
-        self.fullscreen_rect = pygame.Rect(580, 430, 500, 60)
-        fs_color = (0, 180, 80) if IS_FULLSCREEN else (70, 70, 90)
-        pygame.draw.rect(screen, fs_color, self.fullscreen_rect)
-        pygame.draw.rect(screen, (255, 255, 255), self.fullscreen_rect, 4)
+        # Language
+        lang_title = self.font.render(get_text("JAZYK"), True, (200, 200, 220))
+        screen.blit(lang_title, (580, 480))
+        self.language_buttons = []
+        for i, lang in enumerate(self.languages):
+            x = 580 + i * 320
+            rect = pygame.Rect(x, 530, 280, 60)
+            self.language_buttons.append(rect)
+            color = (255, 215, 0) if i == self.current_language_index else (40, 40, 60)
+            pygame.draw.rect(screen, color, rect)
+            pygame.draw.rect(screen, (255, 255, 255), rect, 4 if i == self.current_language_index else 2)
+            txt = self.font.render(lang, True, (255,255,255))
+            screen.blit(txt, txt.get_rect(center=rect.center))
 
-        fs_text = self.font.render("FULLSCREEN" if IS_FULLSCREEN else "OKNO", True, (255, 255, 255))
-        screen.blit(fs_text, fs_text.get_rect(center=self.fullscreen_rect.center))
-
-        # Návod
-        back = self.font_small.render("ESC = zpět do menu", True, (160, 160, 180))
-        screen.blit(back, (780, 650))
-        
-#změna okna
-current_screen = None
+        back = self.font_small.render("ESC = zpět", True, (160, 160, 180))
+        screen.blit(back, (780, 720))
 
 def change_screen(new_state):
     global current_screen, game_state
@@ -1708,6 +1852,9 @@ def change_screen(new_state):
         
     elif new_state == GAME_STATE_SETTINGS:
         current_screen = SettingsScreen()
+        # Pokud přicházíme z in-game, označíme to
+        if isinstance(current_screen, ChampionshipScreen) and hasattr(current_screen, 'show_ingame_menu'):
+            current_screen.from_ingame = True   # předat informaci
         
 change_screen(GAME_STATE_MENU)
 
