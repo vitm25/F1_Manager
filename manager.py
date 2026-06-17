@@ -1058,15 +1058,23 @@ class ChampionshipScreen(Screen):
                 pos = pygame.mouse.get_pos()
 
                 if self.show_ingame_menu:
-                    # In-game menu kliky
                     if hasattr(self, 'continue_rect') and self.continue_rect.collidepoint(pos):
                         self.show_ingame_menu = False
+                        self.paused = False
+                    elif hasattr(self, 'save_rect') and self.save_rect.collidepoint(pos):
+                        self.save_game(slot=1)
+                    elif hasattr(self, 'load_rect') and self.load_rect.collidepoint(pos):
+                        self.show_save_list()
                     elif hasattr(self, 'settings_rect') and self.settings_rect.collidepoint(pos):
                         change_screen(GAME_STATE_SETTINGS)
-                    elif hasattr(self, 'quit_rect') and self.quit_rect.collidepoint(pos):
+                    elif hasattr(self, 'mainmenu_rect') and self.mainmenu_rect.collidepoint(pos):
                         change_screen(GAME_STATE_MENU)
+                    elif hasattr(self, 'quit_rect') and self.quit_rect.collidepoint(pos):
+                        pygame.quit()
+                        sys.exit()
                     return
 
+                # Zbytek handle_events (team select, pit buttons, speed buttons atd.)
                 if self.state == "TEAM_SELECT":
                     for i, (team_name, team) in enumerate(self.teams.items()):
                         rect = pygame.Rect(720, 180 + i*75, 520, 70)
@@ -1083,13 +1091,11 @@ class ChampionshipScreen(Screen):
                         return
 
                 elif self.state == "RACE":
-                    # Klik na BOX jezdec 1 a 2
                     if self.pit_button1 and self.pit_button1.collidepoint(pos):
                         self.show_tire_select = True
                         self.tire_select_for = "driver1"
                         self.tire_select_buttons = []
                         return
-
                     if self.pit_button2 and self.pit_button2.collidepoint(pos):
                         self.show_tire_select = True
                         self.tire_select_for = "driver2"
@@ -1108,65 +1114,40 @@ class ChampionshipScreen(Screen):
                                     self.player_team.drivers[1].pit_requested = True
                                 self.show_tire_select = False
                                 self.tire_select_buttons = []
-                                print(f"Nasazeny {tire_type} pro {self.tire_select_for}")
                                 return
 
-                    # Myš na pause a speed tlačítka
                     if self.pause_button and self.pause_button.collidepoint(pos):
-                        self.state = "PAUSE"   # otevře pause menu
+                        self.paused = not self.paused   # pouze pause / unpause
 
                     for btn in self.speed_buttons:
                         if btn["rect"].collidepoint(pos):
                             self.time_scale = btn["speed"]
 
-                    if self.race_finished and self.next_race_button and self.next_race_button.collidepoint(pos):
+                    if self.race_finished and hasattr(self, 'next_race_button') and self.next_race_button.collidepoint(pos):
                         self.next_race()
-
-                elif self.state == "PAUSE":
-                    pause_buttons = [   # stejné jako v draw
-                        {"text": "Continue", "rect": pygame.Rect(780, 400, 360, 65), "action": "resume"},
-                        {"text": "Save Game", "rect": pygame.Rect(780, 475, 360, 65), "action": "save"},
-                        {"text": "Main Menu", "rect": pygame.Rect(780, 550, 360, 65), "action": "menu"},
-                        {"text": "Quit Game", "rect": pygame.Rect(780, 625, 360, 65), "action": "quit"}
-                    ]
-                    for btn in pause_buttons:
-                        if btn["rect"].collidepoint(pos):
-                            if btn["action"] == "resume":
-                                self.state = "RACE"
-                            elif btn["action"] == "save":
-                                self.save_game(slot=1)
-                                self.state = "RACE"
-                            elif btn["action"] == "menu":
-                                change_screen(GAME_STATE_MENU)
-                            elif btn["action"] == "quit":
-                                pygame.quit()
-                                sys.exit()
 
                 elif self.state == "SAVE_LIST":
                     if event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_ESCAPE:
                             self.state = "RACE"
+                            self.show_ingame_menu = False
                         elif event.key == pygame.K_UP and self.save_list:
                             self.selected_save_index = max(0, self.selected_save_index - 1)
                         elif event.key == pygame.K_DOWN and self.save_list:
                             self.selected_save_index = min(len(self.save_list)-1, self.selected_save_index + 1)
                         elif event.key == pygame.K_RETURN and self.save_list:
-                            # Načtení vybraného souboru
-                            selected_file = self.save_list[self.selected_save_index]["filename"]
-                            filepath = os.path.join(self.save_folder, selected_file)
-                            # ... (zde by byla logika načtení konkrétního souboru - pro jednoduchost načte slot 1 prozatím)
-                            self.load_game(slot=1)
+                            self.load_game(slot=1)   # načte nejnovější
                             self.state = "RACE"
-
+                            self.show_ingame_menu = False
             # ==================== KLÁVESNICOVÉ OVLÁDÁNÍ ====================
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    if self.state == "RACE":
-                        self.state = "PAUSE"          # ESC → Pause menu
-                    elif self.state == "PAUSE":
-                        self.state = "RACE"           # ESC → zpět do hry
+                    if self.show_ingame_menu:
+                        self.show_ingame_menu = False
+                        self.paused = False
                     else:
-                        change_screen(GAME_STATE_MENU)
+                        self.show_ingame_menu = True
+                        self.paused = True
 
                 elif event.key == pygame.K_SPACE:
                     self.paused = not self.paused
@@ -1210,32 +1191,46 @@ class ChampionshipScreen(Screen):
         # F1 carbon dark background
         screen.fill((12, 12, 22))
 
-        # === IN-GAME MENU ===
+        # === IN-GAME MENU (ESC) ===
         if self.show_ingame_menu:
-            overlay = pygame.Rect(340, 180, 600, 360)
-            pygame.draw.rect(screen, (10, 10, 25), overlay)
-            pygame.draw.rect(screen, (255, 215, 0), overlay, 5)
+            # Tmavý overlay
+            overlay = pygame.Rect(460, 200, 1000, 620)
+            s = pygame.Surface((1000, 620))
+            s.set_alpha(235)
+            s.fill((8, 8, 25))
+            screen.blit(s, (460, 200))
+            pygame.draw.rect(screen, (255, 215, 0), overlay, 6)
 
-            title = self.font_big.render("MENU", True, (255, 215, 0))
-            screen.blit(title, title.get_rect(centerx=640, centery=230))
+            title = self.font_big.render("PAUSED", True, (255, 215, 0))
+            screen.blit(title, title.get_rect(centerx=960, centery=255))
 
-            # Tlačítka
-            self.continue_rect = pygame.Rect(440, 300, 400, 60)
-            self.settings_rect = pygame.Rect(440, 380, 400, 60)
-            self.quit_rect = pygame.Rect(440, 460, 400, 60)
+            # Vycentrovaná tlačítka (rovnoměrně pod PAUSED)
+            self.continue_rect = pygame.Rect(720, 320, 480, 65)
+            self.save_rect     = pygame.Rect(720, 395, 480, 65)
+            self.load_rect     = pygame.Rect(720, 470, 480, 65)
+            self.settings_rect = pygame.Rect(720, 545, 480, 65)
+            self.mainmenu_rect = pygame.Rect(720, 620, 480, 65)
+            self.quit_rect     = pygame.Rect(720, 695, 480, 65)
 
-            for rect, text in [(self.continue_rect, "POKRAČOVAT"), 
-                                (self.settings_rect, "NASTAVENÍ"), 
-                                (self.quit_rect, "HLAVNÍ MENU")]:
+            buttons_list = [
+                (self.continue_rect, "POKRAČOVAT"),
+                (self.save_rect,     "ULOŽIT HRU"),
+                (self.load_rect,     "NAČÍST HRU"),
+                (self.settings_rect, "NASTAVENÍ"),
+                (self.mainmenu_rect, "NÁVRAT DO MENU"),
+                (self.quit_rect,     "UKONČIT HRU")
+            ]
+
+            for rect, text in buttons_list:
                 hovered = rect.collidepoint(pygame.mouse.get_pos())
-                color = (50, 50, 80) if hovered else (25, 25, 45)
+                color = (65, 65, 110) if hovered else (30, 30, 55)
                 pygame.draw.rect(screen, color, rect)
-                pygame.draw.rect(screen, (255, 215, 0), rect, 3)
+                pygame.draw.rect(screen, (255, 215, 0), rect, 4)
                 txt = self.font.render(text, True, (255, 255, 255))
                 screen.blit(txt, txt.get_rect(center=rect.center))
             
-            return   # nezobrazujeme zbytek hry při otevřeném menu
-
+            return
+        
         if self.state == "TEAM_SELECT":
             screen.blit(self.font_big.render("VYBERTE SVŮJ TÝM", True, (255, 215, 0)), (720, 120))
             for i, (team_name, team) in enumerate(self.teams.items()):
@@ -1560,41 +1555,10 @@ class ChampionshipScreen(Screen):
                 screen.blit(msg, (960 - msg.get_width()//2, 520))
 
         elif self.state == "PAUSE":
-            # Tmavé překrytí
-            s = pygame.Surface((WIDTH, HEIGHT))
-            s.set_alpha(190)
-            s.fill((0, 0, 0))
-            screen.blit(s, (0, 0))
+            self.show_ingame_menu = True  # přesměrování na nové menu
 
-            # Okno menu
-            menu_rect = pygame.Rect(720, 260, 480, 460)
-            pygame.draw.rect(screen, (25, 25, 45), menu_rect)
-            pygame.draw.rect(screen, (255, 215, 0), menu_rect, 8)
-
-            title = self.font_big.render("PAUSED", True, (255, 215, 0))
-            screen.blit(title, title.get_rect(centerx=960, centery=320))
-
-            pause_buttons = [
-                {"text": "Continue",     "rect": pygame.Rect(780, 400, 360, 65), "action": "resume"},
-                {"text": "Save Game",    "rect": pygame.Rect(780, 475, 360, 65), "action": "save"},
-                {"text": "Main Menu",    "rect": pygame.Rect(780, 550, 360, 65), "action": "menu"},
-                {"text": "Quit Game",    "rect": pygame.Rect(780, 625, 360, 65), "action": "quit"}
-            ]
-
-            mouse_pos = pygame.mouse.get_pos()
-            for btn in pause_buttons:
-                if btn["rect"].collidepoint(mouse_pos):
-                    color = (255, 215, 0)
-                    text_color = (0, 0, 0)
-                else:
-                    color = (255, 255, 255)
-                    text_color = (255, 255, 255)
-
-                pygame.draw.rect(screen, color, btn["rect"], 4)
-                text = self.font.render(btn["text"], True, text_color)
-                screen.blit(text, text.get_rect(center=btn["rect"].center))
         elif self.state == "SAVE_LIST":
-            screen.fill((20, 20, 40))
+            screen.fill((12, 12, 22))
             title = self.font_big.render("ULOŽENÉ HRY", True, (255, 215, 0))
             screen.blit(title, title.get_rect(centerx=960, centery=80))
 
@@ -1602,21 +1566,20 @@ class ChampionshipScreen(Screen):
                 text = self.font.render("Žádné uložené hry...", True, (200, 200, 200))
                 screen.blit(text, text.get_rect(centerx=960, centery=300))
             else:
-                for i, save in enumerate(self.save_list[:8]):  # max 8 položek
-                    y = 160 + i * 55
-                    rect = pygame.Rect(500, y, 920, 48)
-                    color = (70, 70, 110) if i == self.selected_save_index else (40, 40, 70)
+                for i, save in enumerate(self.save_list[:10]):
+                    y = 160 + i * 58
+                    rect = pygame.Rect(380, y, 1160, 52)
+                    color = (80, 80, 140) if i == self.selected_save_index else (35, 35, 65)
                     pygame.draw.rect(screen, color, rect)
                     pygame.draw.rect(screen, (255, 215, 0), rect, 3)
 
                     date = save['date'][:16] if isinstance(save['date'], str) else "Neznámé"
-                    line = f"{i+1}. {save['filename'][:45]:<45} | Kolo {save['round']} | {save['track']}"
+                    line = f"{i+1:2}. {save['filename'][:50]:<50} | {save['track']} | Kolo {save['round']} | {date}"
                     txt = self.font.render(line, True, (255, 255, 255))
-                    screen.blit(txt, (520, y + 12))
+                    screen.blit(txt, (410, y + 14))
 
-            # Návod
             help_text = self.font.render("↑↓ = výběr | ENTER = načíst | ESC = zpět", True, (180, 180, 180))
-            screen.blit(help_text, help_text.get_rect(centerx=960, centery=680))
+            screen.blit(help_text, help_text.get_rect(centerx=960, centery=780))
 
 # trénink
 class PracticeScreen(Screen):
