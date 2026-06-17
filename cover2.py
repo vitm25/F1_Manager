@@ -17,8 +17,8 @@ for track in tracks:
 CURRENT_FPS = 60
 IS_FULLSCREEN = False
 
-WIDTH = 1920
-HEIGHT = 1080
+WIDTH = 1280
+HEIGHT = 720
 barvy_pozadi = (0, 0, 0,)
 FPS = 60
 RACE_ARE_WIDTH = 650
@@ -272,14 +272,14 @@ class Screen:
     
 class MenuScreen(Screen):
     def __init__(self):
-        self.font = pygame.font.SysFont("arial", 28)
-        self.font_big = pygame.font.SysFont("arial", 48)
+        self.font = pygame.font.SysFont("arial", 28, bold=True)
+        self.font_big = pygame.font.SysFont("arial", 52, bold=True)
 
         self.buttons = [
-            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(800, 340, 320, 65), "action": GAME_STATE_RACE},
-            {"text": "PRACTICE",     "rect": pygame.Rect(800, 420, 320, 65), "action": GAME_STATE_PRACTICE},
-            {"text": "SETTINGS",     "rect": pygame.Rect(800, 500, 320, 65), "action": GAME_STATE_SETTINGS},
-            {"text": "VYPNOUT",      "rect": pygame.Rect(800, 580, 320, 65), "action": "QUIT"}
+            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(760, 340, 400, 70), "action": GAME_STATE_RACE},
+            {"text": "PRACTICE",     "rect": pygame.Rect(760, 425, 400, 70), "action": GAME_STATE_PRACTICE},
+            {"text": "SETTINGS",     "rect": pygame.Rect(760, 510, 400, 70), "action": GAME_STATE_SETTINGS},
+            {"text": "VYPNOUT",      "rect": pygame.Rect(760, 595, 400, 70), "action": "QUIT"}
         ]
 
     def handle_events(self, events):
@@ -316,7 +316,6 @@ class MenuScreen(Screen):
         # Podnadpis
         subtitle = self.font.render("2025 SEASON", True, (180, 180, 210))
         screen.blit(subtitle, subtitle.get_rect(centerx=960, centery=265))
-
 
         mouse_pos = pygame.mouse.get_pos()
         
@@ -1162,9 +1161,7 @@ class ChampionshipScreen(Screen):
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     if self.state == "RACE":
-                        self.state = "PAUSE"          # ESC → Pause menu
-                    elif self.state == "PAUSE":
-                        self.state = "RACE"           # ESC → zpět do hry
+                        self.show_ingame_menu = not self.show_ingame_menu
                     else:
                         change_screen(GAME_STATE_MENU)
 
@@ -1635,7 +1632,6 @@ class PracticeScreen(Screen):
                     change_screen(GAME_STATE_MENU)
 # nastavení        
 class SettingsScreen(Screen):
-
     def __init__(self):
         self.font = pygame.font.SysFont("arial", 28)
         self.font_big = pygame.font.SysFont("arial", 42)
@@ -1646,12 +1642,7 @@ class SettingsScreen(Screen):
 
         self.fullscreen_rect = None
         self.fps_buttons = []
-        
-    # updaty
-    def update(self, delta_time):
-        pass
 
-    # eventy
     def handle_events(self, events):
         global CURRENT_FPS, IS_FULLSCREEN
 
@@ -1679,7 +1670,7 @@ class SettingsScreen(Screen):
                         CURRENT_FPS = self.fps_options[i]
                         clock.tick(CURRENT_FPS)  # okamžitá změna
                         print(f"FPS nastaveno na: {CURRENT_FPS}")
-    
+
     def draw(self, screen):
         screen.fill((12, 12, 25))  # tmavé F1 pozadí
 
