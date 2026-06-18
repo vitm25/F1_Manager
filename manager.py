@@ -43,7 +43,7 @@ TEXTS = {
     "VYPNOUT": {"CS": "VYPNOUT", "EN": "QUIT", "IT": "SPEGNERE"},
 
     # In-game menu
-    "PAUSED": {"CS": "PAUSED", "EN": "PAUSED"},
+    "PAUSED": {"CS": "POZASTAVENO", "EN": "PAUSED", },
     "POKRAČOVAT": {"CS": "POKRAČOVAT", "EN": "CONTINUE"},
     "ULOŽIT HRU": {"CS": "ULOŽIT HRU", "EN": "SAVE GAME"},
     "NAČÍST HRU": {"CS": "NAČÍST HRU", "EN": "LOAD GAME"},
