@@ -229,7 +229,6 @@ class Driver: # jezdec
 
 # výpočet akt. rychlosti
 def get_speed(driver, race):
-    
     speed = driver.base_speed
     
     # opotřebení zpomaluje
@@ -247,13 +246,12 @@ def get_speed(driver, race):
         speed *= 0.4
         
     # DRS boost
-    if driver.drs_active:
+    if driver.drs_active and not race.safety_car_active:
         speed *= 1.15
 
-    # safety car
-
+    # === SAFETY CAR - VÝRAZNÉ ZPOMALENÍ ===
     if race.safety_car_active:
-        speed *= 0.5
+        speed *= 0.38   # velmi výrazné zpomalení (dříve 0.42)
 
     return speed
     
@@ -608,6 +606,10 @@ class ChampionshipScreen(Screen):
         self.vsc_timer = 0.0
         self.yellow_flag_active = False
         self.yellow_flag_timer = 0.0
+
+        # === SAFETY CAR POSITION ===
+        self.safety_car_index = 0
+        self.safety_car_progress = 0.0
 
         self.selected_driver = None
         self.time_scale = 1
@@ -979,15 +981,50 @@ class ChampionshipScreen(Screen):
             elif roll < 0.88: self.current_weather = "CLOUD"
             else: self.current_weather = "RAIN"
 
-        # Safety car
-        if random.random() < 0.0008 and not self.safety_car_active:
+        # Safety car spuštění + pohyb
+        if random.random() < 0.0009 and not self.safety_car_active and self.race_time > 20:
             self.safety_car_active = True
-            self.safety_car_timer = random.uniform(10, 28)
+            self.safety_car_timer = random.uniform(15, 35)
+            self.safety_car_index = 0
+            self.safety_car_progress = 0.0
+            print("🚨 SAFETY CAR DEPLOYED! Všichni zpomaleni.")
+
+        path = self.current_track["racing_line"]
+        path_len = len(path)
 
         if self.safety_car_active:
             self.safety_car_timer -= delta_time
+            
+            # Pohyb Safety Caru
+            sc_speed = 0.38
+            self.safety_car_progress += sc_speed * delta_time * self.time_scale
+            
+            while self.safety_car_progress >= 1.0:
+                self.safety_car_progress -= 1.0
+                self.safety_car_index = (self.safety_car_index + 1) % path_len
+            
             if self.safety_car_timer <= 0:
                 self.safety_car_active = False
+                print("🏁 Safety Car in - závod pokračuje")
+
+        path = self.current_track["racing_line"]
+        path_len = len(path)
+
+        # === SAFETY CAR POHYB ===
+        if self.safety_car_active:
+            self.safety_car_timer -= delta_time
+            
+            # Pohyb Safety Caru (pomaleji než jezdci)
+            sc_speed = 0.35
+            self.safety_car_progress += sc_speed * delta_time * self.time_scale
+            
+            while self.safety_car_progress >= 1.0:
+                self.safety_car_progress -= 1.0
+                self.safety_car_index = (self.safety_car_index + 1) % path_len
+            
+            if self.safety_car_timer <= 0:
+                self.safety_car_active = False
+                print("🏁 Safety Car in")
 
         if self.vsc_active:
             self.vsc_timer -= delta_time
@@ -999,9 +1036,6 @@ class ChampionshipScreen(Screen):
             if self.yellow_flag_timer > 6:
                 self.yellow_flag_active = False
                 self.yellow_flag_timer = 0
-
-        path = self.current_track["racing_line"]
-        path_len = len(path)
 
         race_progress = max((d.current_lap for d in self.drivers if not d.finished), default=0) / self.current_track["laps"]
 
@@ -1549,6 +1583,24 @@ class ChampionshipScreen(Screen):
                     size = 11 if driver == self.selected_driver else 8
                     pygame.draw.circle(screen, (255,255,255), (int(x), int(y)), size + 3)
                     pygame.draw.circle(screen, color, (int(x), int(y)), size)
+
+                # === SAFETY CAR VIZUÁLNĚ ===
+                if self.safety_car_active:
+                    i = self.safety_car_index
+                    next_i = (i + 1) % len(path)
+                    x1, y1 = path[i]
+                    x2, y2 = path[next_i]
+                    x = x1 * scale_x + (x2 - x1) * self.safety_car_progress * scale_x + map_x
+                    y = y1 * scale_y + (y2 - y1) * self.safety_car_progress * scale_y + map_y
+
+                    # Velký žlutý kruh s černým okrajem
+                    pygame.draw.circle(screen, (255, 215, 0), (int(x), int(y)), 14)      # žlutá
+                    pygame.draw.circle(screen, (0, 0, 0), (int(x), int(y)), 14, 4)       # černý okraj
+                    pygame.draw.circle(screen, (0, 0, 0), (int(x), int(y)), 8)           # vnitřní kruh
+
+                    # Text "SC"
+                    sc_text = self.font_small.render("SC", True, (0, 0, 0))
+                    screen.blit(sc_text, sc_text.get_rect(center=(int(x), int(y))))
 
                         # === BOXY PRO JEZDCE 1 A 2 ===
             box_y = 650
