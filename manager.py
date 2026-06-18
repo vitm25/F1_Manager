@@ -53,32 +53,32 @@ TEXTS = {
     "VYPNOUT": {"CS": "VYPNOUT", "EN": "QUIT", "IT": "SPEGNERE"},
 
     # In-game menu
-    "PAUSED": {"CS": "POZASTAVENO", "EN": "PAUSED", },
-    "POKRAČOVAT": {"CS": "POKRAČOVAT", "EN": "CONTINUE"},
-    "ULOŽIT HRU": {"CS": "ULOŽIT HRU", "EN": "SAVE GAME"},
-    "NAČÍST HRU": {"CS": "NAČÍST HRU", "EN": "LOAD GAME"},
-    "NASTAVENÍ": {"CS": "NASTAVENÍ", "EN": "SETTINGS"},
-    "NÁVRAT DO MENU": {"CS": "NÁVRAT DO MENU", "EN": "MAIN MENU"},
-    "UKONČIT HRU": {"CS": "UKONČIT HRU", "EN": "QUIT GAME"},
+    "PAUSED": {"CS": "POZASTAVENO", "EN": "PAUSED", "IT": "SOSPESO"},
+    "POKRAČOVAT": {"CS": "POKRAČOVAT", "EN": "CONTINUE", "IT": "CONTINUA"},
+    "ULOŽIT HRU": {"CS": "ULOŽIT HRU", "EN": "SAVE GAME", "IT": "SALVA PARTITA"},
+    "NAČÍST HRU": {"CS": "NAČÍST HRU", "EN": "LOAD GAME", "IT": "CARICA IL GIOCO"},
+    "NASTAVENÍ": {"CS": "NASTAVENÍ", "EN": "SETTINGS", "IT": "IMPOSTAZIONI"},
+    "NÁVRAT DO MENU": {"CS": "NÁVRAT DO MENU", "EN": "MAIN MENU", "IT": "TORNA AL MENU"},
+    "UKONČIT HRU": {"CS": "UKONČIT HRU", "EN": "QUIT GAME", "IT": "TERMINA IL GIOCO"},
 
     # Závod
-    "Kolo": {"CS": "Kolo", "EN": "Lap"},
-    "Čas:": {"CS": "Čas:", "EN": "Time:"},
-    "Počasí:": {"CS": "Počasí:", "EN": "Weather:"},
-    "Gumy:": {"CS": "Gumy:", "EN": "Tires:"},
-    "Opotřebení kol:": {"CS": "Opotřebení kol:", "EN": "Tire Wear:"},
-    "FORMATION LAP": {"CS": "FORMACE KOLO", "EN": "FORMATION LAP"},
-    "LIGHTS OUT...": {"CS": "SVĚTLA ZHASLA...", "EN": "LIGHTS OUT..."},
-    "VYBERTE SVŮJ TÝM": {"CS": "VYBERTE SVŮJ TÝM", "EN": "CHOOSE YOUR TEAM"},
-    "Váš tým:": {"CS": "Váš tým:", "EN": "Your team:"},
-    "ZAČÁTEK SEZÓNY": {"CS": "ZAČÁTEK SEZÓNY", "EN": "START SEASON"},
+    "Kolo": {"CS": "Kolo", "EN": "Lap", "IT": "GIRO"},
+    "Čas:": {"CS": "Čas:", "EN": "Time:", "IT": "ORA"},
+    "Počasí:": {"CS": "Počasí:", "EN": "Weather:", "IT": "METEO"},
+    "Gumy:": {"CS": "Gumy:", "EN": "Tires:", "IT": "PNEUMATICI"},
+    "Opotřebení kol:": {"CS": "Opotřebení kol:", "EN": "Tire Wear:", "IT": "USURA DELLE RUOTE"},
+    "FORMATION LAP": {"CS": "FORMACE KOLO", "EN": "FORMATION LAP", "IT": "GIRO DI FORMAZIONE"},
+    "LIGHTS OUT...": {"CS": "SVĚTLA ZHASLA...", "EN": "LIGHTS OUT...", "IT": "LE LUCI SI SONO SPENTE..."},
+    "VYBERTE SVŮJ TÝM": {"CS": "VYBERTE SVŮJ TÝM", "EN": "CHOOSE YOUR TEAM", "IT": "SCEGLI LA TUA SQUADRA"},
+    "Váš tým:": {"CS": "Váš tým:", "EN": "Your team:", "IT": "Il vostro team"},
+    "ZAČÁTEK SEZÓNY": {"CS": "ZAČÁTEK SEZÓNY", "EN": "START SEASON", "IT": "INIZIO DELLA STAGIONE"},
 
     # Nastavení
-    "DÉLKA ZÁVODU": {"CS": "DÉLKA ZÁVODU", "EN": "RACE LENGTH"},
-    "SHORT RACE": {"CS": "SHORT RACE", "EN": "SHORT RACE"},
-    "FULL RACE (1h30+)": {"CS": "FULL RACE (1h30+)", "EN": "FULL RACE (1h30+)"},
-    "JAZYK": {"CS": "JAZYK", "EN": "LANGUAGE"},
-    "FRAMERATE (FPS)": {"CS": "FRAMERATE (FPS)", "EN": "FRAMERATE (FPS)"},
+    "DÉLKA ZÁVODU": {"CS": "DÉLKA ZÁVODU", "EN": "RACE LENGTH", "IT": "DURATA DELLA GARA"},
+    "SHORT RACE": {"CS": "SHORT RACE", "EN": "SHORT RACE", "IT": "GARA BREVE"},
+    "FULL RACE (1h30+)": {"CS": "FULL RACE (1h30+)", "EN": "FULL RACE (1h30+)", "IT": "GARA COMPLETA (1H30+)"},
+    "JAZYK": {"CS": "JAZYK", "EN": "LANGUAGE", "IT": "LINGUA"},
+    "FRAMERATE (FPS)": {"CS": "FRAMERATE (FPS)", "EN": "FRAMERATE (FPS)", "IT": "FREQUENZA DEI FRAME"},
 }
 
 def get_text(key, lang=None):
@@ -227,11 +227,14 @@ class Driver: # jezdec
         self.dnf_reason = None              # "Engine", "Fuel", "Crash", "Spin"
         self.incident_cooldown = 0
 
-# výpočet akt. rychlosti
 def get_speed(driver, race):
+    """Vrátí rychlost jezdce s ohledem na Safety Car"""
+    if race.safety_car_active:
+        return 0.36   # velmi pomalá rychlost - jezdci se seřadí za SC
+
     speed = driver.base_speed
     
-    # opotřebení zpomaluje
+    # opotřebení
     speed *= (1 - driver.tire_wear * 0.4)
     
     # počasí
@@ -240,18 +243,14 @@ def get_speed(driver, race):
             speed *= 0.85
         elif driver.tire == "INTER":
             speed *= 1.05
-            
+
     # pit lane
     if driver.in_pit:
         speed *= 0.4
-        
-    # DRS boost
+
+    # DRS
     if driver.drs_active and not race.safety_car_active:
         speed *= 1.15
-
-    # === SAFETY CAR - VÝRAZNÉ ZPOMALENÍ ===
-    if race.safety_car_active:
-        speed *= 0.38   # velmi výrazné zpomalení (dříve 0.42)
 
     return speed
     
@@ -343,10 +342,10 @@ class MenuScreen(Screen):
         self.font_big = pygame.font.SysFont("arial", 48)
 
         self.buttons = [
-            {"text": "CHAMPIONSHIP", "rect": pygame.Rect(800, 340, 320, 65), "action": GAME_STATE_RACE},
-            {"text": "PRACTICE",     "rect": pygame.Rect(800, 420, 320, 65), "action": GAME_STATE_PRACTICE},
-            {"text": "SETTINGS",     "rect": pygame.Rect(800, 500, 320, 65), "action": GAME_STATE_SETTINGS},
-            {"text": "VYPNOUT",      "rect": pygame.Rect(800, 580, 320, 65), "action": "QUIT"}
+            {"key": "CHAMPIONSHIP", "rect": pygame.Rect(800, 340, 320, 65), "action": GAME_STATE_RACE},
+            {"key": "PRACTICE",     "rect": pygame.Rect(800, 420, 320, 65), "action": GAME_STATE_PRACTICE},
+            {"key": "SETTINGS",     "rect": pygame.Rect(800, 500, 320, 65), "action": GAME_STATE_SETTINGS},
+            {"key": "VYPNOUT",      "rect": pygame.Rect(800, 580, 320, 65), "action": "QUIT"}
         ]
 
     def handle_events(self, events):
@@ -363,34 +362,27 @@ class MenuScreen(Screen):
                             change_screen(btn["action"])
 
     def draw(self, screen):
-        # Futuristické carbon + gradient přes celou výšku
-        screen.fill((7, 7, 17))   # velmi tmavé pozadí
+        screen.fill((7, 7, 17))
 
-        # Gradient přes celou obrazovku (tmavě fialovo-červený → černý)
+        # Gradient
         for i in range(HEIGHT):
-            # Čím níže, tím tmavší
             intensity = int(28 * (1 - i / HEIGHT))
             color = (intensity + 8, max(0, intensity - 18), intensity + 12)
             pygame.draw.line(screen, color, (0, i), (WIDTH, i))
 
-        # Tenký světlejší horizontální pruh nahoře (jako F1 broadcast)
-        pygame.draw.rect(screen, (35, 0, 25), (0, 0, WIDTH, 280), border_radius=0)
+        pygame.draw.rect(screen, (35, 0, 25), (0, 0, WIDTH, 280))
 
-        # Hlavní nadpis
-        title = self.font_big.render("F1 MANAGER", True, (255, 215, 0))
+        title = self.font_big.render(get_text("F1 MANAGER"), True, (255, 215, 0))
         screen.blit(title, title.get_rect(centerx=960, centery=205))
 
-        # Podnadpis
-        subtitle = self.font.render("2025 SEASON", True, (180, 180, 210))
+        subtitle = self.font.render(get_text("2025 SEASON"), True, (180, 180, 210))
         screen.blit(subtitle, subtitle.get_rect(centerx=960, centery=265))
-
 
         mouse_pos = pygame.mouse.get_pos()
         
         for btn in self.buttons:
             hovered = btn["rect"].collidepoint(mouse_pos)
             
-            # Button
             if hovered:
                 pygame.draw.rect(screen, (45, 45, 70), btn["rect"])
                 border_color = (255, 215, 0)
@@ -400,11 +392,9 @@ class MenuScreen(Screen):
                 border_color = (200, 200, 210)
                 text_color = (240, 240, 255)
 
-            # Rámeček
             pygame.draw.rect(screen, border_color, btn["rect"], 5)
 
-            # Text
-            text = self.font.render(btn["text"], True, text_color)
+            text = self.font.render(get_text(btn["key"]), True, text_color)
             screen.blit(text, text.get_rect(center=btn["rect"].center))
 
 def ai_choose_pace(driver, race_progress, current_weather):
@@ -611,6 +601,13 @@ class ChampionshipScreen(Screen):
         self.safety_car_index = 0
         self.safety_car_progress = 0.0
 
+        # === SAFETY CAR REÁLNÉ CHOVÁNÍ ===
+        self.safety_car_active = False
+        self.safety_car_timer = 0.0
+        self.safety_car_index = 0
+        self.safety_car_progress = 0.0
+        self.safety_car_phase = "NONE"   # "DEPLOYED", "LEADING", "ENDING"
+
         self.selected_driver = None
         self.time_scale = 1
         self.paused = False
@@ -661,7 +658,7 @@ class ChampionshipScreen(Screen):
         if self.current_race_index >= len(CALENDAR_2025):
             print("Sezóna skončila!")
             return
-
+        
         calendar_entry = CALENDAR_2025[self.current_race_index]
         race_name = calendar_entry["name"]
 
@@ -699,8 +696,8 @@ class ChampionshipScreen(Screen):
             print(f"Full race mode - {self.current_track['laps']} kol")
         else:
             if self.current_track:
-                self.current_track["laps"] = max(10, self.current_track["laps"] // 2)
-            print("Short race mode")
+                self.current_track["laps"] = max(10, self.current_track.get("laps", 58) // 2)
+            print(f"Short race mode - {self.current_track['laps']} kol")
 
         for driver in self.drivers:
             driver.track_index = 0
@@ -981,13 +978,13 @@ class ChampionshipScreen(Screen):
             elif roll < 0.88: self.current_weather = "CLOUD"
             else: self.current_weather = "RAIN"
 
-        # Safety car spuštění + pohyb
-        if random.random() < 0.0009 and not self.safety_car_active and self.race_time > 20:
+        # === SAFETY CAR LOGIKA (jako ve skutečné F1) ===
+        if random.random() < 0.001 and not self.safety_car_active and self.race_time > 25:
             self.safety_car_active = True
-            self.safety_car_timer = random.uniform(15, 35)
+            self.safety_car_timer = random.uniform(20, 55)
             self.safety_car_index = 0
             self.safety_car_progress = 0.0
-            print("🚨 SAFETY CAR DEPLOYED! Všichni zpomaleni.")
+            print("🚨 SAFETY CAR OUT - Jezdci zpomalují a seřazují se!")
 
         path = self.current_track["racing_line"]
         path_len = len(path)
@@ -996,35 +993,14 @@ class ChampionshipScreen(Screen):
             self.safety_car_timer -= delta_time
             
             # Pohyb Safety Caru
-            sc_speed = 0.38
-            self.safety_car_progress += sc_speed * delta_time * self.time_scale
-            
+            self.safety_car_progress += 0.37 * delta_time * self.time_scale
             while self.safety_car_progress >= 1.0:
                 self.safety_car_progress -= 1.0
                 self.safety_car_index = (self.safety_car_index + 1) % path_len
-            
+
             if self.safety_car_timer <= 0:
                 self.safety_car_active = False
-                print("🏁 Safety Car in - závod pokračuje")
-
-        path = self.current_track["racing_line"]
-        path_len = len(path)
-
-        # === SAFETY CAR POHYB ===
-        if self.safety_car_active:
-            self.safety_car_timer -= delta_time
-            
-            # Pohyb Safety Caru (pomaleji než jezdci)
-            sc_speed = 0.35
-            self.safety_car_progress += sc_speed * delta_time * self.time_scale
-            
-            while self.safety_car_progress >= 1.0:
-                self.safety_car_progress -= 1.0
-                self.safety_car_index = (self.safety_car_index + 1) % path_len
-            
-            if self.safety_car_timer <= 0:
-                self.safety_car_active = False
-                print("🏁 Safety Car in")
+                print("🏁 SAFETY CAR IN - Závod pokračuje normálně!")
 
         if self.vsc_active:
             self.vsc_timer -= delta_time
@@ -1108,42 +1084,45 @@ class ChampionshipScreen(Screen):
             base_wear = PACE[driver.pace_mode]["wear"] * TIRES[driver.tire]["wear"]
             
             tire_life_factor = {
-                "SOFT":  3.8,      # velmi rychlé opotřebení
+                "SOFT":  3.8,
                 "MEDIUM":2.4,
                 "HARD":  1.35,
                 "INTER": 2.1,
                 "WET":   1.6
             }.get(driver.tire, 2.0)
 
-            # Zvýšený multiplikátor pro reálnější degradaci
             driver.tire_wear += delta_time * base_wear * tire_life_factor * 0.145
             driver.tire_wear = min(1.0, driver.tire_wear)
 
             # === PIT STOP LOGIKA ===
             if driver.pit_requested and not driver.in_pit and not driver.on_pit_lane:
-                # Začátek pit stopu - jezdec zajede do pitlane
                 driver.on_pit_lane = True
                 driver.in_pit = True
                 driver.pit_timer = 0.0
                 driver.pit_requested = False
-                print(f"→ {driver.name} zajíždí do boxů")
 
             if driver.in_pit:
                 driver.pit_timer += delta_time
-                
-                # Po dokončení pit stopu
                 if driver.pit_timer >= PIT_TIME:
                     driver.in_pit = False
                     driver.on_pit_lane = False
                     driver.tire = driver.next_tire
                     driver.tire_wear = 0.0
                     driver.last_pit_lap = driver.current_lap
-                    
-                    # Vrátíme jezdce zpět na trať (o několik pozic vpřed)
                     driver.track_index = (driver.track_index + 8) % path_len
-                    driver.progress = 0.3   # trochu vpřed, aby nevznikaly kolize
-                    
-                    print(f"✓ {driver.name} dokončil pit stop → {driver.tire}")
+                    driver.progress = 0.3
+
+        # === KONEC ZÁVODU - SPRÁVNÁ KONTROLA ===
+        leader = max(self.drivers, key=lambda d: d.current_lap)
+        target_laps = self.current_track["laps"]
+
+        if leader.current_lap >= target_laps and not self.race_finished:
+            print(f"🏁 Závod skončil! Leader dokončil {target_laps} kol.")
+            for driver in self.drivers:
+                if not driver.finished and not driver.is_dnf:
+                    driver.finished = True
+                    driver.total_time = self.race_time
+            self.finish_race()
 
         # === START AUDIO + TEXT ===
         if self.race_phase == RACE_PHASE_START and not self.start_audio_played:
@@ -1180,8 +1159,9 @@ class ChampionshipScreen(Screen):
                 driver.drs_active = True
 
     def handle_battles(self):
-        if not self.current_track:
-            return
+        if not self.current_track or self.safety_car_active:
+            return  # Žádné předjíždění během Safety Caru
+        
         path_len = len(self.current_track["racing_line"])
         ordered = sorted(self.drivers, key=lambda d: d.current_lap * path_len + d.track_index + d.progress, reverse=True)
         
@@ -1193,7 +1173,6 @@ class ChampionshipScreen(Screen):
             behind_pos = behind.current_lap * path_len + behind.track_index + behind.progress
             gap = front_pos - behind_pos
             
-            # Velké okno pro boj + častější předjíždění
             if 0 < gap < 2.2:
                 front_speed = get_speed(front, self)
                 behind_speed = get_speed(behind, self)
@@ -1306,11 +1285,13 @@ class ChampionshipScreen(Screen):
                     if self.show_ingame_menu:
                         self.show_ingame_menu = False
                         self.paused = False
-                        self.state = "RACE"          # ← důležitý reset
+                        self.state = "RACE"
                     elif self.state == "SAVE_LIST":
                         self.state = "RACE"
                         self.show_ingame_menu = False
                         self.paused = False
+                    elif self.state == "TEAM_SELECT":
+                        change_screen(GAME_STATE_MENU)   # ← NOVÉ
                     else:
                         self.show_ingame_menu = True
                         self.paused = True
@@ -1357,7 +1338,7 @@ class ChampionshipScreen(Screen):
         # F1 carbon dark background
         screen.fill((12, 12, 22))
 
-        # === IN-GAME MENU (ESC) ===
+                # === IN-GAME MENU (ESC) ===
         if self.show_ingame_menu:
             # Tmavý overlay
             overlay = pygame.Rect(460, 200, 1000, 620)
@@ -1367,10 +1348,10 @@ class ChampionshipScreen(Screen):
             screen.blit(s, (460, 200))
             pygame.draw.rect(screen, (255, 215, 0), overlay, 6)
 
-            title = self.font_big.render("PAUSED", True, (255, 215, 0))
+            title = self.font_big.render(get_text("PAUSED"), True, (255, 215, 0))
             screen.blit(title, title.get_rect(centerx=960, centery=255))
 
-            # Vycentrovaná tlačítka (rovnoměrně pod PAUSED)
+            # Vycentrovaná tlačítka
             self.continue_rect = pygame.Rect(720, 320, 480, 65)
             self.save_rect     = pygame.Rect(720, 395, 480, 65)
             self.load_rect     = pygame.Rect(720, 470, 480, 65)
@@ -1379,12 +1360,12 @@ class ChampionshipScreen(Screen):
             self.quit_rect     = pygame.Rect(720, 695, 480, 65)
 
             buttons_list = [
-                (self.continue_rect, "POKRAČOVAT"),
-                (self.save_rect,     "ULOŽIT HRU"),
-                (self.load_rect,     "NAČÍST HRU"),
-                (self.settings_rect, "NASTAVENÍ"),
-                (self.mainmenu_rect, "NÁVRAT DO MENU"),
-                (self.quit_rect,     "UKONČIT HRU")
+                (self.continue_rect, get_text("POKRAČOVAT")),
+                (self.save_rect,     get_text("ULOŽIT HRU")),
+                (self.load_rect,     get_text("NAČÍST HRU")),
+                (self.settings_rect, get_text("NASTAVENÍ")),
+                (self.mainmenu_rect, get_text("NÁVRAT DO MENU")),
+                (self.quit_rect,     get_text("UKONČIT HRU"))
             ]
 
             for rect, text in buttons_list:
@@ -1856,6 +1837,11 @@ class SettingsScreen(Screen):
                         else:
                             CURRENT_LANGUAGE = "IT"   # Italian
                         print(f"Jazyk: {CURRENT_LANGUAGE}")
+
+                print(f"Jazyk změněn na: {CURRENT_LANGUAGE}")
+                # Refresh aktuální obrazovky
+                if isinstance(current_screen, MenuScreen) or isinstance(current_screen, ChampionshipScreen):
+                    pass  # při příštím draw se použije nový jazyk
 
     def draw(self, screen):
         screen.fill((12, 12, 25))
