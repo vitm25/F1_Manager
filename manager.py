@@ -7,7 +7,19 @@ import os
 from datetime import datetime
 from tracks_data import tracks
 from championship_data import TEAMS, DRIVER_BASE_TIMES, CALENDAR_2025
-pygame.init() # spusteni knihovny
+
+pygame.init()
+
+# === BEZPEČNÁ AUDIO INICIALIZACE (pro školní PC) ===
+AUDIO_ENABLED = False
+try:
+    pygame.mixer.init(44100, -16, 2, 512)
+    AUDIO_ENABLED = True
+    print("✅ Audio inicializováno")
+except pygame.error as e:
+    print(f"⚠️ Audio nelze inicializovat: {e}")
+    print("   Hra poběží bez zvuku (typické na školních počítačích)")
+    pygame.mixer.quit()   # úplně vypnout mixer
 
 print("Dostupné tratě:")
 for track in tracks:
@@ -17,11 +29,9 @@ for track in tracks:
 CURRENT_FPS = 60
 IS_FULLSCREEN = False
 
-pygame.mixer.init()
-
 # Globální nastavení závodu a jazyka
 CURRENT_RACE_MODE = "SHORT"
-CURRENT_LANGUAGE = "CS"
+CURRENT_LANGUAGE = "CS"   # CZ → CS (opraveno)
 
 # Race phases
 RACE_PHASE_FORMATION = "FORMATION"
@@ -29,7 +39,7 @@ RACE_PHASE_START = "START"
 RACE_PHASE_RACING = "RACING"
 
 # Cesty k audio komentářům
-START_COMMENT_CS = "sounds/start_cs.mp3"
+START_COMMENT_CS = "sounds/start_cz.mp3"
 START_COMMENT_EN = "sounds/start_en.mp3"
 
 # === LOKALIZACE - SNADNO ROZŠIŘITELNÁ ===
@@ -1745,7 +1755,12 @@ class SettingsScreen(Screen):
         self.current_race_mode_index = 0 if CURRENT_RACE_MODE == "SHORT" else 1
 
         self.languages = ["ČEŠTINA", "ENGLISH", "ITALIANO"]
-        self.current_language_index = 0 if CURRENT_LANGUAGE == "CS" else 1 # CS, EN, DE
+        if CURRENT_LANGUAGE == "CS":
+            self.current_language_index = 0
+        elif CURRENT_LANGUAGE == "EN":
+            self.current_language_index = 1
+        else:
+            self.current_language_index = 2
 
         self.from_ingame = False
 
@@ -1782,7 +1797,13 @@ class SettingsScreen(Screen):
                 for i, rect in enumerate(self.language_buttons):
                     if rect.collidepoint(pos):
                         self.current_language_index = i
-                        CURRENT_LANGUAGE = "CS" if i == 0 else "EN"
+                        if i == 0:
+                            CURRENT_LANGUAGE = "CS"
+                        elif i == 1:
+                            CURRENT_LANGUAGE = "EN"
+                        else:
+                            CURRENT_LANGUAGE = "IT"   # Italian
+                        print(f"Jazyk: {CURRENT_LANGUAGE}")
 
     def draw(self, screen):
         screen.fill((12, 12, 25))
