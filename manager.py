@@ -965,10 +965,6 @@ class ChampionshipScreen(Screen):
         delta_time *= self.time_scale
         self.race_time += delta_time
 
-        # === FORMATION LAP LOGIKA ===
-        if self.race_phase == RACE_PHASE_FORMATION:
-            formation_speed_multiplier = 0.45
-
         # Počasí
         self.weather_timer += delta_time
         if self.weather_timer > WEATHER_CHANGE_TIME * 1.5:
@@ -984,14 +980,13 @@ class ChampionshipScreen(Screen):
             self.safety_car_timer = random.uniform(20, 55)
             self.safety_car_index = 0
             self.safety_car_progress = 0.0
-            print("🚨 SAFETY CAR OUT - Jezdci zpomalují a seřazují se!")
+            print("🚨 SAFETY CAR OUT - Jezdci se seřazují za ním!")
 
         path = self.current_track["racing_line"]
         path_len = len(path)
 
         if self.safety_car_active:
             self.safety_car_timer -= delta_time
-            
             # Pohyb Safety Caru
             self.safety_car_progress += 0.37 * delta_time * self.time_scale
             while self.safety_car_progress >= 1.0:
@@ -1000,7 +995,7 @@ class ChampionshipScreen(Screen):
 
             if self.safety_car_timer <= 0:
                 self.safety_car_active = False
-                print("🏁 SAFETY CAR IN - Závod pokračuje normálně!")
+                print("🏁 SAFETY CAR IN - Závod pokračuje!")
 
         if self.vsc_active:
             self.vsc_timer -= delta_time
@@ -1029,7 +1024,7 @@ class ChampionshipScreen(Screen):
             if random.random() < 0.012 and not driver.is_dnf:
                 generate_incident(driver, self)
 
-                        # AI rozhodnutí - pouze pro jezdce, které neovládá hráč
+            # AI rozhodnutí
             if (driver != self.player_team.drivers[0] and 
                 driver != self.player_team.drivers[1] and 
                 driver.ai_decision_timer > 0.9):
@@ -1045,26 +1040,11 @@ class ChampionshipScreen(Screen):
                 
                 driver.ai_decision_timer = 0
 
-            # Výpočet rychlosti
-            tire_bonus = TIRES.get(driver.tire, TIRES["MEDIUM"])["pace"]
-            pace_bonus = PACE.get(driver.pace_mode, PACE["NEUTRAL"])["pace"]
-            wear_penalty = driver.tire_wear * 0.55
-            weather_mod = WEATHER_TYPES.get(self.current_weather, WEATHER_TYPES["SUN"])["lap_modifier"]
+            # === ZÍSKÁNÍ RYCHLOSTI (včetně SC) ===
+            speed = get_speed(driver, self)
 
-            target_lap_time = driver.base_lap_time + tire_bonus + pace_bonus
-            target_lap_time *= (1 + wear_penalty + weather_mod)
-            if target_lap_time < 1: target_lap_time = 1.0
-
-            segments_per_sec = path_len / target_lap_time
-            speed = segments_per_sec
-
-            if driver.drs_active and self.current_weather != "RAIN":
-                speed *= 1.13
-            if driver.in_pit or driver.on_pit_lane:
-                speed *= 0.32
-            if self.safety_car_active:
-                speed *= 0.52
-
+            # Základní posun
+            segments_per_sec = path_len / max(1.0, driver.base_lap_time * 1.1)
             driver.progress += speed * delta_time * speed_multiplier
 
             while driver.progress >= 1.0:
@@ -1078,23 +1058,14 @@ class ChampionshipScreen(Screen):
                     if self.race_phase == RACE_PHASE_FORMATION and driver.current_lap >= 1:
                         self.formation_lap_completed = True
                         self.race_phase = RACE_PHASE_START
-                        print("✅ Formation lap completed - starting the race!")
 
-            # === OPOTŘEBENÍ PNEUMATIK – VÝRAZNĚ ZVÝŠENO ===
+            # Opotřebení kol
             base_wear = PACE[driver.pace_mode]["wear"] * TIRES[driver.tire]["wear"]
-            
-            tire_life_factor = {
-                "SOFT":  3.8,
-                "MEDIUM":2.4,
-                "HARD":  1.35,
-                "INTER": 2.1,
-                "WET":   1.6
-            }.get(driver.tire, 2.0)
-
+            tire_life_factor = {"SOFT": 3.8, "MEDIUM":2.4, "HARD":1.35, "INTER":2.1, "WET":1.6}.get(driver.tire, 2.0)
             driver.tire_wear += delta_time * base_wear * tire_life_factor * 0.145
             driver.tire_wear = min(1.0, driver.tire_wear)
 
-            # === PIT STOP LOGIKA ===
+            # Pit stop logika
             if driver.pit_requested and not driver.in_pit and not driver.on_pit_lane:
                 driver.on_pit_lane = True
                 driver.in_pit = True
@@ -1112,7 +1083,7 @@ class ChampionshipScreen(Screen):
                     driver.track_index = (driver.track_index + 8) % path_len
                     driver.progress = 0.3
 
-        # === KONEC ZÁVODU - SPRÁVNÁ KONTROLA ===
+        # === KONEC ZÁVODU ===
         leader = max(self.drivers, key=lambda d: d.current_lap)
         target_laps = self.current_track["laps"]
 
@@ -1124,7 +1095,7 @@ class ChampionshipScreen(Screen):
                     driver.total_time = self.race_time
             self.finish_race()
 
-        # === START AUDIO + TEXT ===
+        # Start audio + DRS + Battles
         if self.race_phase == RACE_PHASE_START and not self.start_audio_played:
             self.start_audio_played = True
             try:
