@@ -230,25 +230,20 @@ class Driver: # jezdec
 def get_speed(driver, race):
     """Vrátí rychlost jezdce s ohledem na Safety Car"""
     if race.safety_car_active:
-        return 0.36   # velmi pomalá rychlost - jezdci se seřadí za SC
+        return 0.34   # ještě pomalejší - jezdci se opravdu seřadí za SC
 
     speed = driver.base_speed
-    
-    # opotřebení
     speed *= (1 - driver.tire_wear * 0.4)
     
-    # počasí
     if race.current_weather == "RAIN":
         if driver.tire == "SOFT":
             speed *= 0.85
         elif driver.tire == "INTER":
             speed *= 1.05
 
-    # pit lane
     if driver.in_pit:
         speed *= 0.4
 
-    # DRS
     if driver.drs_active and not race.safety_car_active:
         speed *= 1.15
 
@@ -682,23 +677,27 @@ class ChampionshipScreen(Screen):
             print("CHYBA: Trať nenalezena!")
             return
 
+        # === NASTAVENÍ DÉLKY A RYCHLOSTI ZÁVODU ===
+        original_laps = self.current_track.get("laps", 58)
+        self.current_track["laps"] = original_laps   # oba módy mají plný počet kol
+
+        if CURRENT_RACE_MODE == "FULL":
+            self.time_compression = 1.0          # reálný čas
+            print(f"🏎️ FULL RACE - {original_laps} kol | Reálný čas na kolo")
+        else:  # SHORT
+            self.time_compression = 0.35         # výrazně zrychleno (uprav podle chuti)
+            print(f"🏎️ SHORT RACE - {original_laps} kol | Zrychlený čas ({self.time_compression}x)")
+
+        # Načtení mapy
         try:
             self.track_image = pygame.image.load(self.current_track["map"])
             self.track_image = pygame.transform.scale(self.track_image, 
                 (self.track_display_width, self.track_display_height))
-            print(f"✓ Načtena trať: {self.current_track['name']}")
         except Exception as e:
             print(f"Chyba načtení mapy: {e}")
             self.track_image = None
 
-        # Race length logic
-        if CURRENT_RACE_MODE == "FULL":
-            print(f"Full race mode - {self.current_track['laps']} kol")
-        else:
-            if self.current_track:
-                self.current_track["laps"] = max(10, self.current_track.get("laps", 58) // 2)
-            print(f"Short race mode - {self.current_track['laps']} kol")
-
+        # Reset jezdců
         for driver in self.drivers:
             driver.track_index = 0
             driver.progress = 0.0
@@ -728,14 +727,11 @@ class ChampionshipScreen(Screen):
         self.vsc_active = False
         self.yellow_flag_active = False
 
-        # === NOVÉ: Formation Lap ===
         self.race_phase = RACE_PHASE_FORMATION
         self.formation_lap_completed = False
         self.start_audio_played = False
-        # Test zvuku
-        print(f"Audio paths: CS={START_COMMENT_CS}, EN={START_COMMENT_EN}")
 
-        print("🏁 Formation lap started")
+        print(f"✅ {CURRENT_RACE_MODE} režim spuštěn - {original_laps} kol")
 
     def finish_race(self):
         if self.race_finished:
@@ -1042,6 +1038,9 @@ class ChampionshipScreen(Screen):
 
             # === ZÍSKÁNÍ RYCHLOSTI (včetně SC) ===
             speed = get_speed(driver, self)
+            
+            # === TIME COMPRESSION (rozdíl mezi SHORT a FULL) ===
+            speed *= getattr(self, 'time_compression', 1.0)
 
             # Základní posun
             segments_per_sec = path_len / max(1.0, driver.base_lap_time * 1.1)
