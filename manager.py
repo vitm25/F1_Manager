@@ -229,12 +229,14 @@ class Driver: # jezdec
 
 def get_speed(driver, race):
     """Vrátí rychlost jezdce s ohledem na Safety Car"""
-    if race.safety_car_active:
-        return 0.34   # ještě pomalejší - jezdci se opravdu seřadí za SC
+    if race.safety_car_active and not driver.in_pit:
+        # Auta mimo pit jedou pod SC rychlostí danou frontou za safety carem
+        # (viz ChampionshipScreen.update_safety_car / get_safety_car_speed)
+        return race.get_safety_car_speed(driver)
 
     speed = driver.base_speed
     speed *= (1 - driver.tire_wear * 0.4)
-    
+
     if race.current_weather == "RAIN":
         if driver.tire == "SOFT":
             speed *= 0.85
@@ -248,12 +250,19 @@ def get_speed(driver, race):
         speed *= 1.15
 
     return speed
-    
+
 PIT_TIME = 5.0
 
 SAFETY_CAR_DURATION = 8.0
 VSC_DURATION = 6.0
 RED_FLAG_DURATION = 5.0
+
+# === SAFETY CAR – seřazování do vláčku ===
+SAFETY_CAR_PACE = 0.34             # základní rychlost SC a aut, která už jsou ve frontě (body/s)
+SAFETY_CAR_LEADER_GAP = 2.5        # cílový odstup lídra od SC (ve stejných jednotkách jako track_index)
+SAFETY_CAR_CAR_GAP = 1.6           # cílový odstup mezi jednotlivými auty ve frontě
+SAFETY_CAR_MAX_CATCHUP_TIME = 25.0  # i auto ztracené o celé kolo dožene frontu nejpozději za tolik sekund
+SAFETY_CAR_LINEUP_TOLERANCE = 2.0  # největší dovolená mezera od cílové pozice, aby se pole považovalo za seřazené
 
 #Ai si vybíra kola
 def ai_choose_tire(driver, current_weather):
@@ -520,8 +529,12 @@ def generate_incident(driver, race):
         print(f"💥 DNF – {driver.name} ({driver.dnf_reason})")
 
         if random.random() < 0.55:
-            race.safety_car_active = True
-            race.safety_car_timer = random.uniform(12, 28)
+            if race.safety_car_active:
+                # SC už jede - jen prodloužíme jeho trvání, ale neresetujeme
+                # rozjeté seřazování pole (jinak by se fronta nikdy nedala dohromady)
+                race.safety_car_timer = max(race.safety_car_timer, random.uniform(8, 15))
+            else:
+                race.deploy_safety_car(12, 28)
         else:
             race.vsc_active = True
             race.vsc_timer = random.uniform(8, 18)
@@ -585,23 +598,19 @@ class ChampionshipScreen(Screen):
         self.race_time = 0.0
         self.current_weather = "SUN"
         self.weather_timer = 0.0
-        self.safety_car_active = False
-        self.safety_car_timer = 0.0
         self.vsc_active = False
         self.vsc_timer = 0.0
         self.yellow_flag_active = False
         self.yellow_flag_timer = 0.0
 
-        # === SAFETY CAR POSITION ===
-        self.safety_car_index = 0
-        self.safety_car_progress = 0.0
-
-        # === SAFETY CAR REÁLNÉ CHOVÁNÍ ===
+        # === SAFETY CAR ===
         self.safety_car_active = False
         self.safety_car_timer = 0.0
         self.safety_car_index = 0
         self.safety_car_progress = 0.0
-        self.safety_car_phase = "NONE"   # "DEPLOYED", "LEADING", "ENDING"
+        self.safety_car_laps = 0          # kumulativní počet průjezdů SC (pro porovnání pozic s jezdci)
+        self.safety_car_lined_up = False  # True, jakmile je celé pole seřazené ve vláčku za SC
+        self.safety_car_phase = "NONE"    # "DEPLOYED", "LEADING", "ENDING"
 
         self.selected_driver = None
         self.time_scale = 1
@@ -724,6 +733,11 @@ class ChampionshipScreen(Screen):
         self.race_finished = False
         self.current_weather = "SUN"
         self.safety_car_active = False
+        self.safety_car_timer = 0.0
+        self.safety_car_index = 0
+        self.safety_car_progress = 0.0
+        self.safety_car_laps = 0
+        self.safety_car_lined_up = False
         self.vsc_active = False
         self.yellow_flag_active = False
 
@@ -870,6 +884,10 @@ class ChampionshipScreen(Screen):
             self.current_weather = save_data["current_weather"]
             self.safety_car_active = save_data["safety_car_active"]
             self.safety_car_timer = save_data["safety_car_timer"]
+            self.safety_car_index = 0
+            self.safety_car_progress = 0.0
+            self.safety_car_laps = 0
+            self.safety_car_lined_up = False
             self.vsc_active = save_data["vsc_active"]
             self.vsc_timer = save_data["vsc_timer"]
             self.yellow_flag_active = save_data["yellow_flag_active"]
@@ -972,10 +990,7 @@ class ChampionshipScreen(Screen):
 
         # === SAFETY CAR LOGIKA (jako ve skutečné F1) ===
         if random.random() < 0.001 and not self.safety_car_active and self.race_time > 25:
-            self.safety_car_active = True
-            self.safety_car_timer = random.uniform(20, 55)
-            self.safety_car_index = 0
-            self.safety_car_progress = 0.0
+            self.deploy_safety_car(20, 55)
             print("🚨 SAFETY CAR OUT - Jezdci se seřazují za ním!")
 
         path = self.current_track["racing_line"]
@@ -983,15 +998,22 @@ class ChampionshipScreen(Screen):
 
         if self.safety_car_active:
             self.safety_car_timer -= delta_time
-            # Pohyb Safety Caru
-            self.safety_car_progress += 0.37 * delta_time * self.time_scale
+            # Pohyb Safety Caru (stejné tempo jako auta v koloně za ním)
+            self.safety_car_progress += SAFETY_CAR_PACE * getattr(self, 'time_compression', 1.0) * delta_time
             while self.safety_car_progress >= 1.0:
                 self.safety_car_progress -= 1.0
                 self.safety_car_index = (self.safety_car_index + 1) % path_len
+                if self.safety_car_index == 0:
+                    self.safety_car_laps += 1
 
-            if self.safety_car_timer <= 0:
+            self.update_safety_car_queue()
+
+            if self.safety_car_timer <= 0 and self.safety_car_lined_up:
                 self.safety_car_active = False
+                self.safety_car_lined_up = False
                 print("🏁 SAFETY CAR IN - Závod pokračuje!")
+        else:
+            self._sc_speed_overrides = {}
 
         if self.vsc_active:
             self.vsc_timer -= delta_time
@@ -1117,6 +1139,62 @@ class ChampionshipScreen(Screen):
 
         if all(d.finished or d.is_dnf for d in self.drivers):
             self.finish_race()
+
+    def deploy_safety_car(self, min_duration, max_duration):
+        """Nasadí Safety Car na pozici aktuálního lídra, aby na něj mohlo pole postupně navázat."""
+        path_len = len(self.current_track["racing_line"]) if self.current_track else 1
+        active = [d for d in self.drivers if not d.finished and not d.is_dnf]
+        leader = max(
+            active,
+            key=lambda d: d.current_lap * path_len + d.track_index + d.progress,
+            default=None,
+        )
+
+        self.safety_car_active = True
+        self.safety_car_timer = random.uniform(min_duration, max_duration)
+        self.safety_car_lined_up = False
+
+        if leader:
+            self.safety_car_laps = leader.current_lap
+            self.safety_car_index = leader.track_index
+            self.safety_car_progress = leader.progress
+        else:
+            self.safety_car_laps = 0
+            self.safety_car_index = 0
+            self.safety_car_progress = 0.0
+
+        self._sc_speed_overrides = {}
+
+    def update_safety_car_queue(self):
+        """Spočítá cílové pozice a rychlosti aut, aby se seřadily do vláčku za Safety Carem."""
+        path_len = len(self.current_track["racing_line"])
+        sc_pos = self.safety_car_laps * path_len + self.safety_car_index + self.safety_car_progress
+
+        queue = [d for d in self.drivers if not d.finished and not d.is_dnf and not d.in_pit]
+        queue.sort(key=lambda d: d.current_lap * path_len + d.track_index + d.progress, reverse=True)
+
+        overrides = {}
+        worst_gap = 0.0
+
+        for i, driver in enumerate(queue):
+            target_pos = sc_pos - SAFETY_CAR_LEADER_GAP - i * SAFETY_CAR_CAR_GAP
+            current_pos = driver.current_lap * path_len + driver.track_index + driver.progress
+            gap = target_pos - current_pos
+
+            if gap > 0:
+                # Rychlost dohánění je úměrná velikosti mezery, takže i auto ztracené
+                # o celé kolo dožene frontu nejpozději za SAFETY_CAR_MAX_CATCHUP_TIME sekund.
+                overrides[id(driver)] = SAFETY_CAR_PACE + gap / SAFETY_CAR_MAX_CATCHUP_TIME
+            else:
+                overrides[id(driver)] = 0.0
+
+            worst_gap = max(worst_gap, gap)
+
+        self._sc_speed_overrides = overrides
+        self.safety_car_lined_up = worst_gap <= SAFETY_CAR_LINEUP_TOLERANCE
+
+    def get_safety_car_speed(self, driver):
+        return getattr(self, '_sc_speed_overrides', {}).get(id(driver), SAFETY_CAR_PACE)
 
     def update_drs(self):
         ordered = sorted(self.drivers, key=lambda d: (d.current_lap, d.distance), reverse=True)
