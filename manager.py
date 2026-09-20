@@ -8,6 +8,11 @@ from datetime import datetime
 from tracks_data import tracks
 from championship_data import TEAMS, DRIVER_BASE_TIMES, CALENDAR_2025
 
+# Adresář, kde leží manager.py - všechny relativní cesty (mapy, zvuky, uložené hry)
+# se vždy počítají odsud, ne od aktuálního pracovního adresáře (ten se liší podle
+# toho, odkud/čím se hra spouští - dvojklik, IDE, terminál...).
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 pygame.init()
 
 # === BEZPEČNÁ AUDIO INICIALIZACE (pro školní PC) ===
@@ -39,8 +44,8 @@ RACE_PHASE_START = "START"
 RACE_PHASE_RACING = "RACING"
 
 # Cesty k audio komentářům
-START_COMMENT_CS = "sounds/start_cz.mp3"
-START_COMMENT_EN = "sounds/start_en.mp3"
+START_COMMENT_CS = os.path.join(SCRIPT_DIR, "sounds", "start_cz.mp3")
+START_COMMENT_EN = os.path.join(SCRIPT_DIR, "sounds", "start_en.mp3")
 
 # === LOKALIZACE - SNADNO ROZŠIŘITELNÁ ===
 TEXTS = {
@@ -68,6 +73,7 @@ TEXTS = {
     "Gumy:": {"CS": "Gumy:", "EN": "Tires:", "IT": "PNEUMATICI"},
     "Opotřebení kol:": {"CS": "Opotřebení kol:", "EN": "Tire Wear:", "IT": "USURA DELLE RUOTE"},
     "FORMATION LAP": {"CS": "FORMACE KOLO", "EN": "FORMATION LAP", "IT": "GIRO DI FORMAZIONE"},
+    "START LIGHTS": {"CS": "STARTOVNÍ SEMAFOR", "EN": "START LIGHTS", "IT": "SEMAFORI DI PARTENZA"},
     "LIGHTS OUT...": {"CS": "SVĚTLA ZHASLA...", "EN": "LIGHTS OUT...", "IT": "LE LUCI SI SONO SPENTE..."},
     "VYBERTE SVŮJ TÝM": {"CS": "VYBERTE SVŮJ TÝM", "EN": "CHOOSE YOUR TEAM", "IT": "SCEGLI LA TUA SQUADRA"},
     "Váš tým:": {"CS": "Váš tým:", "EN": "Your team:", "IT": "Il vostro team"},
@@ -88,14 +94,7 @@ def get_text(key, lang=None):
 
 WIDTH = 1920
 HEIGHT = 1080
-barvy_pozadi = (0, 0, 0,)
 FPS = 60
-RACE_ARE_WIDTH = 650
-
-pit_entry_index = 5
-
-race_finished = False
-points_awarded = False
 
 #vykreslení okna
 screen = pygame.display.set_mode([WIDTH, HEIGHT])
@@ -104,25 +103,13 @@ pygame.display.set_caption("F1 manažer")
 clock = pygame.time.Clock()
 
 GAME_STATE_MENU = "MENU"
-GAME_STATE_CHAMPIONSHIP = "CHAMPIONSHIP"
 GAME_STATE_PRACTICE = "PRACTICE"
 GAME_STATE_SETTINGS = "SETTINGS"
 GAME_STATE_RACE = "RACE"
-GAME_STATE_PAUSE = "PAUSE"
 game_state = GAME_STATE_MENU
-GAME_STATE_LOAD = "Load"
+current_screen = None
 
-# tlačítka
-buttons = [
-    {"text": "CHAMPIONSHIP", "rect": pygame.Rect(300, 200, 300, 60), "action": GAME_STATE_CHAMPIONSHIP},
-    {"text": "PRACTICE", "rect": pygame.Rect(300, 280, 300, 60), "action": GAME_STATE_PRACTICE},
-    {"text": "SETTINGS", "rect": pygame.Rect(300, 360, 300, 60), "action": GAME_STATE_SETTINGS}
-]
-
-WEATHER_CHANGE_TIME = 12.0
-
-race_time = 0.0
-font = pygame.font.SysFont("arial", 28)
+WEATHER_CHANGE_LAPS = 4  # jak často (v odjetých kolech lídra) se losuje nové počasí
 
 TIRES = {
     "SOFT": {"pace": -0.3, "wear": 0.04},
@@ -130,6 +117,21 @@ TIRES = {
     "HARD": {"pace": 0.3, "wear": 0.015},
     "INTER": {"pace": 0.6, "wear": 0.02},
     "WET": {"pace": 1.0, "wear": 0.018},
+}
+
+# Opotřebení za JEDNO dojeté kolo při NEUTRAL tempu (viz update() - škáluje se
+# skutečně ujetou vzdáleností, ne uplynulým časem, takže je stejné na všech tratích
+# i při libovolném time_scale/time_compression). Hodnoty jsou kalibrované tak, aby
+# guma dosáhla 100 % opotřebení zhruba v 1.4× průměrné délky stintu, kterou plánuje
+# ai_plan_stint() (SOFT ~9.5, MEDIUM ~14, HARD ~21, INTER ~8, WET ~7 kol) - takže
+# se běžně piťuje podle plánu (target_stint_end) a práh tire_wear > 0.88 slouží jen
+# jako nouzová pojistka při agresivním tempu (PUSH) nebo prodlužovaném stintu.
+TIRE_WEAR_PER_LAP = {
+    "SOFT": 0.075,
+    "MEDIUM": 0.051,
+    "HARD": 0.034,
+    "INTER": 0.089,
+    "WET": 0.102,
 }
 
 POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
@@ -198,14 +200,16 @@ class Driver: # jezdec
         
         self.base_speed = random.uniform(0.95, 1.05)
         self.overtake_skill = random.uniform(0.8, 1.2)
-        
-        self.distance = 0.0
+
         self.drs_active = False
 
         self.track_index = 0
         self.progress = 0
         self.angle = 0
         self.finished = False
+
+        self.grid_position = 0            # pořadí na startovním roštu (0 = pole position)
+        self.formation_start_delay = 0.0  # kdy (race_time) se auto rozjede z roštu
 
         self.pit_requested = False
         self.on_pit_lane = False
@@ -228,11 +232,32 @@ class Driver: # jezdec
         self.incident_cooldown = 0
 
 def get_speed(driver, race):
-    """Vrátí rychlost jezdce s ohledem na Safety Car"""
+    """Vrátí rychlost jezdce s ohledem na Safety Car a formační kolo"""
     if race.safety_car_active and not driver.in_pit:
         # Auta mimo pit jedou pod SC rychlostí danou frontou za safety carem
         # (viz ChampionshipScreen.update_safety_car / get_safety_car_speed)
         return race.get_safety_car_speed(driver)
+
+    if race.race_phase == RACE_PHASE_START and not driver.in_pit:
+        # Startovní semafor: auta stojí na roštu, dokud světla nezhasnou.
+        return 0.0
+
+    if race.race_phase == RACE_PHASE_FORMATION and not driver.in_pit:
+        # Formační kolo: auto se rozjede až ve svém pořadí na roštu a jede
+        # stejnou pevnou rychlostí jako ostatní - pořadí se tak nikdy nezamíchá.
+        if race.race_time < driver.formation_start_delay:
+            return 0.0
+        # Rychlost se dopočítává tak, aby CELÉ formační kolo trvalo tolik, kolik
+        # trvá na reálném okruhu (formation_lap_duration - z reálné délky okruhu).
+        # Počet bodů v racing_line je jen "rozlišení" ručního vykreslení tratě a
+        # není úměrný reálné délce okruhu, proto se z něj čas nedá odvodit.
+        path_len = len(race.current_track["racing_line"])
+        pace = path_len / formation_lap_duration(race.current_track)
+        # O pár řádků výš v update() se `speed *= time_compression` - to by jinak
+        # znamenalo, že SHORT/FULL mód mění i délku formačního kola. Formační kolo
+        # má trvat vždy stejně dlouho v reálném čase bez ohledu na zvolený režim
+        # závodu, proto se tu dělení time_compression předem "vyruší".
+        return pace / getattr(race, 'time_compression', 1.0)
 
     speed = driver.base_speed
     speed *= (1 - driver.tire_wear * 0.4)
@@ -253,9 +278,57 @@ def get_speed(driver, race):
 
 PIT_TIME = 5.0
 
+# === FORMAČNÍ KOLO – pevné pořadí podle roštu, žádné předjíždění ===
+# Délka formačního kola = reálná délka okruhu / průměrná rychlost formace. Reálné
+# délky okruhů (km) jsou z Wikipedie (seznam okruhů F1 sezóny 2025). Konkrétní časy
+# formačního kola pro jednotlivé okruhy nikde veřejně zveřejněné nejsou, ale zdroje
+# uvádějí formační tempo 50-120 km/h; 120 km/h navíc sedí s uživatelovým údajem pro
+# Zandvoort (4,259 km -> 2:08, uživatel uvádí 1:45-2:15) i s jeho požadavkem 2-3 min
+# pro Austrálii (5,278 km -> 2:38).
+FORMATION_SPEED_KMH = 120.0
+TRACK_LENGTH_KM = {
+    "Australia": 5.278, "China": 5.451, "Japan": 5.807, "Bahrain": 5.412,
+    "Saudi Arabia": 6.174, "Miami": 5.410, "Imola": 4.909, "Monaco": 3.337,
+    "Canada": 4.361, "Spain": 4.657, "Austria": 4.318, "Silverstone": 5.891,
+    "Hungary": 4.381, "Belgium": 7.004, "Netherlands": 4.259, "Monza": 5.793,
+    "Azerbaijan": 6.003, "Singapore": 4.940, "USA": 5.513, "Mexico": 4.304,
+    "Brazil": 4.309, "Las Vegas": 6.201, "Qatar": 5.419, "Abu Dhabi": 5.281,
+}
+FORMATION_LAP_DURATION_FALLBACK = 125.0  # pro trať, která není v TRACK_LENGTH_KM
+
+
+def formation_lap_duration(track):
+    """Reálná délka formačního kola dané tratě v sekundách."""
+    length_km = TRACK_LENGTH_KM.get(track.get("name"))
+    if length_km is None:
+        return FORMATION_LAP_DURATION_FALLBACK
+    return length_km / FORMATION_SPEED_KMH * 3600.0
+
+
+FORMATION_GRID_GAP = 0.5     # o kolik race_time sekund později se rozjede každé další auto na roštu
+
+# === STARTOVNÍ SEMAFOR (po formačním kole) ===
+# Jako ve skutečné F1: 5 červených světel se rozsvěcí po jednom v 1s intervalech,
+# pak náhodná prodleva a všechna světla naráz zhasnou = start závodu. Časuje se v
+# REÁLNÝCH sekundách (nezávisle na time_scale/time_compression), aby sekvence vypadala
+# vždy stejně; při pauze stojí.
+START_LIGHTS_COUNT = 5
+START_LIGHT_INTERVAL = 1.0      # s mezi rozsvícením dvou světel
+START_HOLD_MIN = 0.2            # s po rozsvícení všech 5 světel než zhasnou (náhodně v rozsahu)
+START_HOLD_MAX = 3.0
+START_LIGHTS_OUT_DISPLAY = 1.5  # s, po které zůstane na obrazovce nápis "světla zhasla"
+# Hned po startu stojí auta těsně za sebou (rozestupy jsou hluboko pod prahem souboje v
+# handle_battles), takže by se pole hned první snímek náhodně "přeskákalo". Po zhasnutí
+# světel se proto souboje o pozice na chvíli (race_time sekundy) vypnou - pole se nejdřív
+# přirozeně roztáhne, jako v první zatáčce.
+START_NO_BATTLE_SECONDS = 8.0
+
 SAFETY_CAR_DURATION = 8.0
 VSC_DURATION = 6.0
 RED_FLAG_DURATION = 5.0
+
+DRS_GAP_THRESHOLD = 3.5  # max. odstup (ve stejných jednotkách jako track_index) pro aktivaci DRS
+DRS_FIRST_LAP = 3        # DRS se povoluje až od 3. kola (jako ve F1 - první dvě kola je zakázané)
 
 # === SAFETY CAR – seřazování do vláčku ===
 SAFETY_CAR_PACE = 0.34             # základní rychlost SC a aut, která už jsou ve frontě (body/s)
@@ -286,50 +359,6 @@ def ai_choose_tire(driver, current_weather):
         else:
             return "MEDIUM"                 # výjimečná chyba
 
-# body z šampionát
-def award_championship_points(drivers):
-    # seřadíme podle času
-    results = sorted(drivers, key=lambda d: d.total_time)
-    
-    for i, driver in enumerate(results):
-        if i < len(POINTS):
-            pts = POINTS[i]
-            driver.points += pts
-            print(f"{driver.name} scored {pts} points")
-            
-#reset závodu
-def reset_race(drivers):
-    
-    global points_awarded
-    points_awarded = False
-    
-    for d in drivers:
-        d.total_time = 0
-        d.current_lap = 0
-        d.tire_wear = 0
-        d.in_pit = False
-        d.finished = False
-        
-# menu
-menu_options = ["Championship", "Free Practice", "Settings"]
-selected_menu_index = 0
-
-def draw_menu():
-    screen.fill((20,20,20))
-    mouse_pos = pygame.mouse.get_pos()
-    
-    for btn in buttons:
-        
-        color = (255,255,255)
-        
-        if btn["rect"].collidepoint(mouse_pos):
-            color = (255,200,0)
-            
-        pygame.draw.rect(screen, color, btn["rect"], 2)
-        
-        text = font.render(btn["text"], True, (255,255,255))
-        screen.blit(text, (btn["rect"].x + 20, btn["rect"].y + 15))
-        
 class Screen:
     def handle_events(self, events):
         pass
@@ -471,15 +500,20 @@ def ai_should_pit(driver, race):
         return True
 
     # === UNDERCUT / OVERCUT LOGIKA ===
-    driver.current_stint_laps += 1   # každé kolo +1
+    # (driver.current_stint_laps se počítá centrálně při dojetí kola v update(),
+    # ne tady - jinak by rostlo podle počtu AI rozhodovacích tiků, ne podle kol)
 
     # Najdeme nejlepšího soupeře před ním
+    # (stejný poziční vzorec jako handle_battles/Safety Car - dřív se tu místo
+    # skutečné délky racing_line používala natvrdo *100, což by se rozbilo na
+    # každé trati s víc než 100 body racing line)
+    path_len = len(race.current_track["racing_line"])
     ahead = None
     min_gap = 999
     for d in race.drivers:
         if d == driver: continue
-        gap = (d.current_lap * 100 + d.track_index + d.progress) - \
-              (driver.current_lap * 100 + driver.track_index + driver.progress)
+        gap = (d.current_lap * path_len + d.track_index + d.progress) - \
+              (driver.current_lap * path_len + driver.track_index + driver.progress)
         if 0 < gap < min_gap:
             min_gap = gap
             ahead = d
@@ -492,14 +526,16 @@ def ai_should_pit(driver, race):
             return True
 
     # OVERCUT (zůstanu déle)
-    if driver.current_stint_laps >= driver.target_stint_end - 3:
+    # target_stint_end je ABSOLUTNÍ číslo kola (current_lap + délka stintu při
+    # naplánování), proto se porovnává s driver.current_lap, ne s current_stint_laps.
+    if driver.current_lap >= driver.target_stint_end - 3:
         if random.random() < 0.4:                     # 40% šance na overcut
             print(f"⏳ OVERCUT {driver.name} – prodlužuji stint")
             driver.target_stint_end += 2
             return False
 
     # Normální pit podle plánu
-    if driver.current_stint_laps >= driver.target_stint_end:
+    if driver.current_lap >= driver.target_stint_end:
         driver.next_tire = ai_choose_tire(driver, race.current_weather)
         return True
 
@@ -542,34 +578,6 @@ def generate_incident(driver, race):
 
     return False
 
-def calculate_gaps(drivers, track):
-    
-    path_len = len(track["racing_line"])
-    laps = track["laps"]
-    
-    # Průměrný čas na kolo (použijeme později reálný)
-    avg_lap = 90.0  # vteřin – upravíš podle trati
-    
-    results = []
-    leader_lap = max(d.current_lap for d in drivers)
-    
-    for d in drivers:
-        position = d.current_lap * path_len + d.track_index + d.progress
-        # Odhad času
-        completed_laps_time = d.total_time if d.total_time > 0 else d.current_lap * avg_lap
-        remaining = (laps - d.current_lap) * avg_lap + (1 - d.progress) * (avg_lap / path_len)
-        
-        est_total = completed_laps_time + remaining
-        results.append((d, est_total, position))
-    
-    results.sort(key=lambda x: x[1])  # seřadíme podle odhadovaného času
-    leader_time = results[0][1]
-    
-    return [(d, est_total - leader_time) for d, est_total, _ in results]
-
-                                     # screen classy
-# závod/ championship
-
 class ChampionshipScreen(Screen):
     def __init__(self):
         self.font = pygame.font.SysFont("arial", 24)
@@ -597,7 +605,7 @@ class ChampionshipScreen(Screen):
         # Race state
         self.race_time = 0.0
         self.current_weather = "SUN"
-        self.weather_timer = 0.0
+        self.weather_last_check_lap = -1  # poslední kolo (lídra), kdy se losovalo počasí
         self.vsc_active = False
         self.vsc_timer = 0.0
         self.yellow_flag_active = False
@@ -631,7 +639,7 @@ class ChampionshipScreen(Screen):
         # === UKLÁDÁNÍ HRY ===
         self.save_message = ""
         self.save_message_timer = 0.0
-        self.save_folder = "saves"
+        self.save_folder = os.path.join(SCRIPT_DIR, "saves")
         os.makedirs(self.save_folder, exist_ok=True)   # vytvoří složku saves, pokud neexistuje
 
         self._initialize_championship()
@@ -644,6 +652,11 @@ class ChampionshipScreen(Screen):
         self.race_phase = RACE_PHASE_FORMATION
         self.formation_lap_completed = False
         self.start_audio_played = False
+        self.start_lights_on = 0                 # kolik světel semaforu právě svítí (0-5)
+        self.start_timer = 0.0                   # reálné sekundy od začátku semaforu
+        self.start_hold_time = random.uniform(START_HOLD_MIN, START_HOLD_MAX)
+        self.start_lights_out_timer = 0.0        # jak dlouho ještě ukazovat "světla zhasla"
+        self.race_start_time = 0.0               # race_time, kdy zhasla světla
 
     def _initialize_championship(self):
         self.teams = {}
@@ -699,8 +712,9 @@ class ChampionshipScreen(Screen):
 
         # Načtení mapy
         try:
-            self.track_image = pygame.image.load(self.current_track["map"])
-            self.track_image = pygame.transform.scale(self.track_image, 
+            map_path = os.path.join(SCRIPT_DIR, self.current_track["map"])
+            self.track_image = pygame.image.load(map_path)
+            self.track_image = pygame.transform.scale(self.track_image,
                 (self.track_display_width, self.track_display_height))
         except Exception as e:
             print(f"Chyba načtení mapy: {e}")
@@ -729,9 +743,16 @@ class ChampionshipScreen(Screen):
 
             ai_plan_stint(driver, self, True)
 
+        # Startovní rošt - pořadí odpovídá aktuálnímu pořadí v self.drivers
+        # (stejné, v jakém se zobrazuje na startu leaderboardu).
+        for grid_i, driver in enumerate(self.drivers):
+            driver.grid_position = grid_i
+            driver.formation_start_delay = grid_i * FORMATION_GRID_GAP
+
         self.race_time = 0.0
         self.race_finished = False
         self.current_weather = "SUN"
+        self.weather_last_check_lap = -1
         self.safety_car_active = False
         self.safety_car_timer = 0.0
         self.safety_car_index = 0
@@ -744,6 +765,11 @@ class ChampionshipScreen(Screen):
         self.race_phase = RACE_PHASE_FORMATION
         self.formation_lap_completed = False
         self.start_audio_played = False
+        self.start_lights_on = 0                 # kolik světel semaforu právě svítí (0-5)
+        self.start_timer = 0.0                   # reálné sekundy od začátku semaforu
+        self.start_hold_time = random.uniform(START_HOLD_MIN, START_HOLD_MAX)
+        self.start_lights_out_timer = 0.0        # jak dlouho ještě ukazovat "světla zhasla"
+        self.race_start_time = 0.0               # race_time, kdy zhasla světla
 
         print(f"✅ {CURRENT_RACE_MODE} režim spuštěn - {original_laps} kol")
 
@@ -976,20 +1002,30 @@ class ChampionshipScreen(Screen):
         if self.save_message_timer > 0:
             self.save_message_timer -= delta_time
         
+        real_delta_time = delta_time  # před time_scale - pro startovní semafor
         delta_time *= self.time_scale
         self.race_time += delta_time
 
-        # Počasí
-        self.weather_timer += delta_time
-        if self.weather_timer > WEATHER_CHANGE_TIME * 1.5:
-            self.weather_timer = 0
+        # Počasí - losuje se podle odjetých kol lídra, ne podle uplynulého reálného
+        # času. Jedno kolo trvá desítky až stovky race-time sekund (podle tratě a
+        # time_compression), takže dřívější časový časovač (18s) přehazoval počasí
+        # i 5-10x za jedno kolo (skoro jistý déšť hned na startu).
+        leader_lap_for_weather = max(
+            (d.current_lap for d in self.drivers if not d.finished and not d.is_dnf),
+            default=0,
+        )
+        if (leader_lap_for_weather != self.weather_last_check_lap
+                and leader_lap_for_weather > 0
+                and leader_lap_for_weather % WEATHER_CHANGE_LAPS == 0):
+            self.weather_last_check_lap = leader_lap_for_weather
             roll = random.random()
             if roll < 0.65: self.current_weather = "SUN"
             elif roll < 0.88: self.current_weather = "CLOUD"
             else: self.current_weather = "RAIN"
 
         # === SAFETY CAR LOGIKA (jako ve skutečné F1) ===
-        if random.random() < 0.001 and not self.safety_car_active and self.race_time > 25:
+        if (random.random() < 0.001 and not self.safety_car_active
+                and self.race_phase == RACE_PHASE_RACING and self.race_time > 25):
             self.deploy_safety_car(20, 55)
             print("🚨 SAFETY CAR OUT - Jezdci se seřazují za ním!")
 
@@ -1032,19 +1068,15 @@ class ChampionshipScreen(Screen):
             if driver.finished or driver.is_dnf:
                 continue
 
-            # === Rychlost podle fáze ===
-            speed_multiplier = 1.0
-            if self.race_phase == RACE_PHASE_FORMATION:
-                speed_multiplier = 0.45
-
             driver.ai_decision_timer += delta_time
 
-            if random.random() < 0.012 and not driver.is_dnf:
+            if self.race_phase == RACE_PHASE_RACING and random.random() < 0.012 and not driver.is_dnf:
                 generate_incident(driver, self)
 
-            # AI rozhodnutí
-            if (driver != self.player_team.drivers[0] and 
-                driver != self.player_team.drivers[1] and 
+            # AI rozhodnutí (před startem - formační kolo a semafor - se nepituje ani nemění tempo)
+            if (self.race_phase == RACE_PHASE_RACING and
+                driver != self.player_team.drivers[0] and
+                driver != self.player_team.drivers[1] and
                 driver.ai_decision_timer > 0.9):
 
                 driver.pace_mode = ai_choose_pace(driver, race_progress, self.current_weather)
@@ -1066,7 +1098,7 @@ class ChampionshipScreen(Screen):
 
             # Základní posun
             segments_per_sec = path_len / max(1.0, driver.base_lap_time * 1.1)
-            driver.progress += speed * delta_time * speed_multiplier
+            driver.progress += speed * delta_time
 
             while driver.progress >= 1.0:
                 driver.progress -= 1.0
@@ -1074,16 +1106,20 @@ class ChampionshipScreen(Screen):
                 
                 if driver.track_index == 0:
                     driver.current_lap += 1
+                    driver.current_stint_laps += 1
                     driver.total_time = self.race_time
                     
                     if self.race_phase == RACE_PHASE_FORMATION and driver.current_lap >= 1:
                         self.formation_lap_completed = True
                         self.race_phase = RACE_PHASE_START
 
-            # Opotřebení kol
-            base_wear = PACE[driver.pace_mode]["wear"] * TIRES[driver.tire]["wear"]
-            tire_life_factor = {"SOFT": 3.8, "MEDIUM":2.4, "HARD":1.35, "INTER":2.1, "WET":1.6}.get(driver.tire, 2.0)
-            driver.tire_wear += delta_time * base_wear * tire_life_factor * 0.145
+            # Opotřebení kol - škáluje se podle skutečně ujeté vzdálenosti (ne podle
+            # uplynulého času), takže je konzistentní napříč tratěmi (různá délka
+            # racing_line) i time_scale/time_compression. `speed * delta_time` je
+            # přesně vzdálenost ujetá tento frame (stejná hodnota, co jde do
+            # driver.progress o pár řádků výš).
+            lap_fraction = (speed * delta_time) / path_len if path_len else 0.0
+            driver.tire_wear += lap_fraction * PACE[driver.pace_mode]["wear"] * TIRE_WEAR_PER_LAP[driver.tire]
             driver.tire_wear = min(1.0, driver.tire_wear)
 
             # Pit stop logika
@@ -1105,40 +1141,70 @@ class ChampionshipScreen(Screen):
                     driver.progress = 0.3
 
         # === KONEC ZÁVODU ===
-        leader = max(self.drivers, key=lambda d: d.current_lap)
+        # Tie-break musí jít přes celou poziční hodnotu, ne jen current_lap - jinak
+        # při shodném počtu kol vyhraje "lídra" jen náhodou první jezdec v
+        # self.drivers, i když je ve skutečnosti (track_index/progress) vzadu.
+        leader = max(self.drivers, key=lambda d: d.current_lap * path_len + d.track_index + d.progress)
         target_laps = self.current_track["laps"]
 
-        if leader.current_lap >= target_laps and not self.race_finished:
+        if leader.current_lap > target_laps and not self.race_finished:
             print(f"🏁 Závod skončil! Leader dokončil {target_laps} kol.")
+            # Všichni zbývající jezdci se dokončí NAJEDNOU v tomto framu, takže
+            # total_time nemůže vycházet z reálného momentu dojezdu (ten u nich
+            # nenastal) - musí se dopočítat z toho, jak daleko za lídrem skutečně
+            # jsou (stejná pozice-jako-vzdálenost, co se používá i jinde v kódu),
+            # jinak by pořadí v cíli (a tedy i body) odpovídalo jen náhodnému
+            # pořadí v self.drivers, ne odjetému závodu.
+            leader_pos = leader.current_lap * path_len + leader.track_index + leader.progress
             for driver in self.drivers:
                 if not driver.finished and not driver.is_dnf:
                     driver.finished = True
-                    driver.total_time = self.race_time
+                    if driver is leader:
+                        driver.total_time = self.race_time
+                    else:
+                        driver_pos = driver.current_lap * path_len + driver.track_index + driver.progress
+                        pos_diff = max(0.0, leader_pos - driver_pos)
+                        estimated_gap = pos_diff * (88 / path_len)  # ~88s/kolo, stejný odhad jako živý leaderboard
+                        driver.total_time = self.race_time + estimated_gap
             self.finish_race()
 
-        # Start audio + DRS + Battles
-        if self.race_phase == RACE_PHASE_START and not self.start_audio_played:
-            self.start_audio_played = True
-            try:
-                if CURRENT_LANGUAGE == "CS" and os.path.exists(START_COMMENT_CS):
-                    pygame.mixer.music.load(START_COMMENT_CS)
-                    print("▶️ Přehrávám český start komentář")
-                elif os.path.exists(START_COMMENT_EN):
-                    pygame.mixer.music.load(START_COMMENT_EN)
-                    print("▶️ Playing English start comment")
-                else:
-                    print("⚠️ Audio soubory nenalezeny v 'sounds/' složce")
-                pygame.mixer.music.play()
-            except Exception as e:
-                print(f"❌ Chyba při přehrávání audia: {e}")
+        # Startovní semafor: 5 světel po jednom, náhodná prodleva, zhasnutí = start
+        if self.start_lights_out_timer > 0:
+            self.start_lights_out_timer = max(0.0, self.start_lights_out_timer - real_delta_time)
 
-            self.race_phase = RACE_PHASE_RACING
+        if self.race_phase == RACE_PHASE_START:
+            self.start_timer += real_delta_time
+            self.start_lights_on = min(START_LIGHTS_COUNT, int(self.start_timer / START_LIGHT_INTERVAL))
+            lights_out_at = START_LIGHTS_COUNT * START_LIGHT_INTERVAL + self.start_hold_time
+            if self.start_timer >= lights_out_at:
+                self.start_lights_on = 0
+                self.start_lights_out_timer = START_LIGHTS_OUT_DISPLAY
+                self.race_start_time = self.race_time
+                self.race_phase = RACE_PHASE_RACING
+                self._play_start_comment()
 
         self.update_drs()
         self.handle_battles()
 
         if all(d.finished or d.is_dnf for d in self.drivers):
             self.finish_race()
+
+    def _play_start_comment(self):
+        if self.start_audio_played:
+            return
+        self.start_audio_played = True
+        try:
+            if CURRENT_LANGUAGE == "CS" and os.path.exists(START_COMMENT_CS):
+                pygame.mixer.music.load(START_COMMENT_CS)
+                print("▶️ Přehrávám český start komentář")
+            elif os.path.exists(START_COMMENT_EN):
+                pygame.mixer.music.load(START_COMMENT_EN)
+                print("▶️ Playing English start comment")
+            else:
+                print("⚠️ Audio soubory nenalezeny v 'sounds/' složce")
+            pygame.mixer.music.play()
+        except Exception as e:
+            print(f"❌ Chyba při přehrávání audia: {e}")
 
     def deploy_safety_car(self, min_duration, max_duration):
         """Nasadí Safety Car na pozici aktuálního lídra, aby na něj mohlo pole postupně navázat."""
@@ -1197,22 +1263,46 @@ class ChampionshipScreen(Screen):
         return getattr(self, '_sc_speed_overrides', {}).get(id(driver), SAFETY_CAR_PACE)
 
     def update_drs(self):
-        ordered = sorted(self.drivers, key=lambda d: (d.current_lap, d.distance), reverse=True)
+        # driver.distance se nikde needituje (zůstává 0.0 z __init__), takže
+        # `front.distance - driver.distance` bylo vždy 0 a DRS bylo prakticky
+        # aktivní pro celé pole pořád (0 < 25 je vždy pravda) - nahrazeno stejným
+        # pozičním vzorcem jako handle_battles/Safety Car.
+        if not self.current_track:
+            return
+        path_len = len(self.current_track["racing_line"])
+        active = [d for d in self.drivers if not d.finished and not d.is_dnf and not d.in_pit]
+        ordered = sorted(active, key=lambda d: d.current_lap * path_len + d.track_index + d.progress, reverse=True)
+
+        for d in self.drivers:
+            d.drs_active = False
+
+        if self.race_phase != RACE_PHASE_RACING:
+            return  # DRS je před startem (formační kolo, semafor) vypnuté
+        if not ordered or ordered[0].current_lap < DRS_FIRST_LAP:
+            return  # a v prvních dvou kolech závodu (current_lap = kolo, které lídr právě jede)
+
         for i, driver in enumerate(ordered):
-            driver.drs_active = False
-            if i == 0: continue
+            if i == 0:
+                continue
             front = ordered[i - 1]
-            gap = front.distance - driver.distance
-            if gap < 25 and self.current_weather != "RAIN" and self.race_time > 5:
+            front_pos = front.current_lap * path_len + front.track_index + front.progress
+            driver_pos = driver.current_lap * path_len + driver.track_index + driver.progress
+            gap = front_pos - driver_pos
+            if 0 < gap < DRS_GAP_THRESHOLD and self.current_weather != "RAIN" and self.race_time > 5:
                 driver.drs_active = True
 
     def handle_battles(self):
-        if not self.current_track or self.safety_car_active:
-            return  # Žádné předjíždění během Safety Caru
-        
+        if not self.current_track or self.safety_car_active or self.race_phase != RACE_PHASE_RACING:
+            return  # Žádné předjíždění během Safety Caru ani před startem (formační kolo, semafor)
+        if self.race_time - self.race_start_time < START_NO_BATTLE_SECONDS:
+            return  # těsně po startu se pole nejdřív roztáhne (viz START_NO_BATTLE_SECONDS)
+
         path_len = len(self.current_track["racing_line"])
-        ordered = sorted(self.drivers, key=lambda d: d.current_lap * path_len + d.track_index + d.progress, reverse=True)
-        
+        # Vyřadit dojeté/DNF/pitující jezdce - jinak šlo "předjet" i zaparkované
+        # auto po nehodě nebo si spočítat souboj s autem v boxové uličce.
+        active = [d for d in self.drivers if not d.finished and not d.is_dnf and not d.in_pit]
+        ordered = sorted(active, key=lambda d: d.current_lap * path_len + d.track_index + d.progress, reverse=True)
+
         for i in range(len(ordered) - 1):
             front = ordered[i]
             behind = ordered[i + 1]
@@ -1364,23 +1454,34 @@ class ChampionshipScreen(Screen):
                 elif event.key == pygame.K_6:           # 6 = Load slot 2
                     self.load_game(slot=2)
 
-                elif event.key == pygame.K_k:           # K = Show list of saves
-                    saves = self.list_saves()
-                    if saves:
-                        print("\n=== ULOŽENÉ HRY ===")
-                        for i, save in enumerate(saves[:10]):   # max 10 položek
-                            print(f"{i+1}. {save['filename']} | Kolo {save['round']} | {save['track']} | {save['date'][:16]}")
-                        self.save_message = f"Zobrazeno {len(saves)} uložených her (v konzoli)"
-                    else:
-                        self.save_message = "Žádné uložené hry nebyly nalezeny."
-                    self.save_message_timer = 4.0
-
                 elif event.key == pygame.K_k:           # K = Seznam uložených her
                     self.show_save_list()
 
-                elif self.state == "PAUSE":
-                    if event.key == pygame.K_RETURN or event.key == pygame.K_SPACE:
-                        self.state = "RACE"   # Enter/Space = Continue
+    def _draw_start_lights(self, screen):
+        """Pětice startovních světel jako na F1 semaforu (2 světla nad sebou v každém sloupci)."""
+        radius = 18
+        pitch = 54
+        pad = 14
+        panel_w = (START_LIGHTS_COUNT - 1) * pitch + 2 * radius + 2 * pad
+        panel_h = 2 * (2 * radius) + 8 + 2 * pad
+        map_center_x = 480 + 720 // 2
+        panel = pygame.Rect(0, 0, panel_w, panel_h)
+        panel.midtop = (map_center_x, 438)  # pod tratí, aby nezakrývala okruh
+
+        pygame.draw.rect(screen, (14, 14, 18), panel, border_radius=12)
+        pygame.draw.rect(screen, (90, 90, 100), panel, 3, border_radius=12)
+
+        for i in range(START_LIGHTS_COUNT):
+            cx = panel.left + pad + radius + i * pitch
+            lit = i < self.start_lights_on
+            for row in range(2):
+                cy = panel.top + pad + radius + row * (2 * radius + 8)
+                pygame.draw.circle(screen, (5, 5, 5), (cx, cy), radius + 3)
+                if lit:
+                    pygame.draw.circle(screen, (235, 20, 20), (cx, cy), radius)
+                    pygame.draw.circle(screen, (255, 120, 120), (cx - 5, cy - 5), 5)
+                else:
+                    pygame.draw.circle(screen, (48, 14, 14), (cx, cy), radius)
 
     def draw(self, screen):
         # F1 carbon dark background
@@ -1445,7 +1546,7 @@ class ChampionshipScreen(Screen):
 
         elif self.state == "RACE":
             # Horní informace - F1 styl
-            current_lap = max((d.current_lap for d in self.drivers), default=0)
+            current_lap = min(max((d.current_lap for d in self.drivers), default=0), self.current_track["laps"])
             track_name = self.current_track["name"] if self.current_track else "?"
 
             screen.blit(self.font_big.render(f"{get_text('Kolo')} {current_lap}/{self.current_track['laps']}", True, (255, 215, 0)), (40, 25))
@@ -1457,7 +1558,10 @@ class ChampionshipScreen(Screen):
                 phase_text = self.font_big.render(get_text("FORMATION LAP"), True, (255, 100, 0))
                 screen.blit(phase_text, (40, 130))
             elif self.race_phase == RACE_PHASE_START:
-                phase_text = self.font_big.render(get_text("LIGHTS OUT..."), True, (255, 215, 0))
+                phase_text = self.font_big.render(get_text("START LIGHTS"), True, (255, 60, 60))
+                screen.blit(phase_text, (40, 130))
+            elif self.start_lights_out_timer > 0:
+                phase_text = self.font_big.render(get_text("LIGHTS OUT..."), True, (0, 255, 120))
                 screen.blit(phase_text, (40, 130))
 
             # Název trati uprostřed
@@ -1537,12 +1641,17 @@ class ChampionshipScreen(Screen):
 
             else:
                 # === BĚŽNÝ LEADERBOARD BĚHEM ZÁVODU ===
-                ordered = sorted(self.drivers, 
-                               key=lambda d: d.current_lap * 10000 + d.track_index * 100 + d.progress * 100, 
+                # Stejný poziční vzorec jako jinde v kódu (handle_battles, Safety Car) -
+                # dřív tu byly natvrdo konstanty *10000/*100, které by se rozbily na
+                # trati s racing_line delší než 100 bodů (track_index by "přetekl" do
+                # číslice kola).
+                leaderboard_path_len = len(self.current_track["racing_line"])
+                ordered = sorted(self.drivers,
+                               key=lambda d: d.current_lap * leaderboard_path_len + d.track_index + d.progress,
                                reverse=True)
                 
-                leader_lap = ordered[0].current_lap if ordered else 0
-                leader_pos = ordered[0].track_index + ordered[0].progress if ordered else 0
+                leader_total_pos = (ordered[0].current_lap * leaderboard_path_len
+                                    + ordered[0].track_index + ordered[0].progress) if ordered else 0
 
                 for i, driver in enumerate(ordered[:20]):
                     rect = pygame.Rect(30, y, 460, 34)
@@ -1556,15 +1665,17 @@ class ChampionshipScreen(Screen):
                     elif driver.finished:
                         gap_str = f"({driver.total_time:.1f}s)"
                         color = (180, 180, 180)
-                    elif driver.current_lap == leader_lap:
-                        # Reálnější výpočet rozestupu v sekundách
-                        pos_diff = leader_pos - (driver.track_index + driver.progress)
-                        gap_raw = pos_diff * (88 / len(self.current_track["racing_line"]))  # ~88s na kolo
-                        gap_str = f"+{max(0, gap_raw):.1f}s"
-                        color = self.teams.get(driver.team_name, (255,255,255)).color
                     else:
-                        laps_down = leader_lap - driver.current_lap
-                        gap_str = f"+{laps_down} kolo" if laps_down == 1 else f"+{laps_down} kol"
+                        # Rozestup podle skutečné pozice na trati, ne podle počítadla kol -
+                        # jinak by po každém průjezdu lídra cílovou čárou (a hlavně na
+                        # startu) všichni ostatní na chvíli svítili jako "+1 kolo".
+                        gap_pts = max(0.0, leader_total_pos - (driver.current_lap * leaderboard_path_len
+                                                               + driver.track_index + driver.progress))
+                        if gap_pts < leaderboard_path_len:
+                            gap_str = f"+{gap_pts * (88 / leaderboard_path_len):.1f}s"  # ~88s na kolo
+                        else:
+                            laps_down = int(gap_pts // leaderboard_path_len)
+                            gap_str = f"+{laps_down} kolo" if laps_down == 1 else f"+{laps_down} kol"
                         color = self.teams.get(driver.team_name, (255,255,255)).color
 
                     drs = " DRS" if driver.drs_active else ""
@@ -1630,6 +1741,10 @@ class ChampionshipScreen(Screen):
                     # Text "SC"
                     sc_text = self.font_small.render("SC", True, (0, 0, 0))
                     screen.blit(sc_text, sc_text.get_rect(center=(int(x), int(y))))
+
+            # Startovní semafor (přes mapu)
+            if self.race_phase == RACE_PHASE_START or self.start_lights_out_timer > 0:
+                self._draw_start_lights(screen)
 
                         # === BOXY PRO JEZDCE 1 A 2 ===
             box_y = 650
@@ -1775,9 +1890,6 @@ class ChampionshipScreen(Screen):
                 msg = self.font.render(self.save_message, True, color)
                 screen.blit(msg, (960 - msg.get_width()//2, 520))
 
-        elif self.state == "PAUSE":
-            self.show_ingame_menu = True  # přesměrování na nové menu
-
         elif self.state == "SAVE_LIST":
             screen.fill((12, 12, 22))
             title = self.font_big.render("ULOŽENÉ HRY", True, (255, 215, 0))
@@ -1844,6 +1956,7 @@ class SettingsScreen(Screen):
             self.current_language_index = 2
 
         self.from_ingame = False
+        self.race_screen = None  # rozjetý ChampionshipScreen, ke kterému se ESC vrátí
 
     def handle_events(self, events):
         global CURRENT_FPS, IS_FULLSCREEN, CURRENT_RACE_MODE, CURRENT_LANGUAGE
@@ -1945,23 +2058,39 @@ class SettingsScreen(Screen):
 
 def change_screen(new_state):
     global current_screen, game_state
-    
+
+    # Musí se zjistit PŘED přepsáním current_screen na nový screen - jinak nejde
+    # poznat, odkud přechod přišel (dřív se to kontrolovalo až po přepsání, takže
+    # podmínka byla vždy False a "návrat z Nastavení" vždy založil úplně nový,
+    # prázdný ChampionshipScreen a rozjetý závod se tím nenávratně zahodil).
+    previous_screen = current_screen
+
     game_state = new_state
-    
+
     if new_state == GAME_STATE_MENU:
         current_screen = MenuScreen()
-        
+
     elif new_state == GAME_STATE_RACE:
-        current_screen = ChampionshipScreen()
-    
+        # Návrat z Nastavení do právě probíhajícího závodu - použít existující
+        # ChampionshipScreen, ne založit nový (to by zahodilo celý rozjetý závod).
+        resumed_race = previous_screen.race_screen if isinstance(previous_screen, SettingsScreen) else None
+        if resumed_race is not None:
+            current_screen = resumed_race
+            current_screen.show_ingame_menu = False
+            current_screen.paused = False
+            current_screen.state = "RACE"
+        else:
+            current_screen = ChampionshipScreen()
+
     elif new_state == GAME_STATE_PRACTICE:
         current_screen = PracticeScreen()
-        
+
     elif new_state == GAME_STATE_SETTINGS:
         current_screen = SettingsScreen()
-        # Pokud přicházíme z in-game, označíme to
-        if isinstance(current_screen, ChampionshipScreen) and hasattr(current_screen, 'show_ingame_menu'):
-            current_screen.from_ingame = True   # předat informaci
+        # Pokud přicházíme z rozjetého závodu, uložit si ho, aby na ESC šlo vrátit
+        if isinstance(previous_screen, ChampionshipScreen):
+            current_screen.race_screen = previous_screen
+            current_screen.from_ingame = True
         
 change_screen(GAME_STATE_MENU)
 
