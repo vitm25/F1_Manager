@@ -38,6 +38,24 @@ zmizí – zbytek UI (leaderboard, standings, boxy) přitom funguje normálně, 
 tom cestách nezávisí. Když se příště přidá nový asset (další zvuk, obrázek, soubor),
 vždy ho načítat přes `os.path.join(SCRIPT_DIR, ...)`, jinak se stejný bug vrátí.
 
+## Audio (složka `sounds/`)
+- `start_cz.mp3` / `start_en.mp3` - startovní komentář při zhasnutí světel.
+- **Zvuk výhry týmu hráče:** `win_cz.mp3` (čeština), `win_en.mp3` (ostatní jazyky), případně
+  jediné společné `win.mp3` (záloha, když chybí soubor pro daný jazyk). Soubory zatím v
+  repozitáři nejsou - uživatel je doplní; bez nich se nic nepřehraje a hra jede dál.
+  Přehraje se v `finish_race()`, když `finished_drivers[0].team_name == player_team.name`
+  (vítěz závodu = jezdec hráčova týmu), zastaví se v `leave_results()` (Další závod).
+- **Strange sound:** vlastní zvuk `sounds/strange.mp3` (doplní uživatel), zapíná se v
+  Nastavení přepínačem "STRANGE SOUND" (globál `STRANGE_SOUND_ENABLED`, výchozí VYP, po
+  restartu hry se nepamatuje). Když je zapnutý, přehraje se **místo** běžného zvuku výhry
+  (mixer.music umí jen jeden stream) při: výhře závodu jezdcem hráčova týmu, a po
+  posledním závodě sezóny (`current_race_index + 1 == len(CALENDAR_2025)`) při titulu
+  konstruktérů nebo jezdců hráčova týmu (`_player_won_championship()`, volá se z
+  `finish_race()`). Chybí-li `strange.mp3`, u výhry závodu se použije běžný zvuk výhry.
+- Přehrávání jde přes `play_first_existing_sound(paths, label)` (bere první existující
+  soubor, chyby audia jen vypíše - kvůli PC bez zvuku), `stop_sound()`; použité i pro start
+  komentář. Cesty vždy přes `SCRIPT_DIR`.
+
 ## Soubory
 - `manager.py` – téměř veškerá herní logika (~2800+ řádků), třídy obrazovek, `Driver`,
   hlavní smyčka `while True`.
@@ -83,22 +101,37 @@ jezdců stejně jako `current_lap*path_len+track_index+progress`), `safety_car_l
 (True, jakmile je celé pole seřazené v těsném vláčku).
 
 Jak to funguje:
-- `deploy_safety_car(min_duration, max_duration)` nasadí SC na pozici AKTUÁLNÍHO LÍDRA
-  (ne na start/cíl) a nastaví náhodný timer.
+- `deploy_safety_car(min_duration, max_duration)` SC jen vyhlásí: SC "čeká v boxové uličce"
+  u výjezdu (viz životní cyklus níže) a nastaví náhodný timer (= nejkratší doba SC na trati).
 - `update_safety_car_queue()` (volaná každý frame, dokud je SC aktivní) spočítá pro
   každého jezdce cílový slot ve frontě za SC (`sc_pos - SAFETY_CAR_LEADER_GAP - i*SAFETY_CAR_CAR_GAP`
   podle aktuálního pořadí) a rychlost dohánění úměrnou velikosti mezery
   (`SAFETY_CAR_MAX_CATCHUP_TIME` = i auto ztracené o celé kolo dožene frontu nejpozději
   za tuto dobu). Uloží výsledky do `self._sc_speed_overrides`.
 - `get_speed()` při aktivním SC (a jezdec není v pit lane) vrací
-  `race.get_safety_car_speed(driver)` místo normálního výpočtu.
+  `min(race.get_safety_car_speed(driver), racing_speed(driver, race))` - dohánějící /
+  odlapující se auto tedy nikdy nejede rychleji než při normálním závodním tempu.
 - `handle_battles()` při aktivním SC rovnou vrací (žádné předjíždění).
-- SC se stáhne (`safety_car_active=False`) až když je `safety_car_timer<=0` **A**
-  zároveň `safety_car_lined_up` je True – ne jen podle vypršení časovače.
+- SC končí až když je `safety_car_timer<=0` **A** `safety_car_lined_up` **A** nikdo není
+  lapovaný (`_lapped_cars()` = aktivní auta o ≥ 1 kolo za lídrem) – ne jen podle časovače.
+  DNF auta se nepočítají. V praxi trvá SC 1-2 kola SC tempem (odlapování ~1-2 min
+  race-času podle tratě), což odpovídá reálným 3-6 kolům pod SC.
 - **Důležité:** pokud během SC nastane další incident, NESMÍ se znovu volat
   `deploy_safety_car()` (to by resetovalo pozici SC i `lined_up` a fronta by se nikdy
   nedoseřadila) – místo toho se jen prodlouží `safety_car_timer`. Viz
   `generate_incident()`.
+- **Životní cyklus** `safety_car_phase` (řeší `_update_safety_car()`, vždy přes boxovou uličku):
+  `WAITING` (SC stojí v uličce před výjezdem - `deploy_safety_car` ho zaparkuje o
+  `SAFETY_CAR_EXIT_RUN` před koncem uličky, na nejbližším výjezdu PŘED lídrem; celé pole jede
+  do té doby stejným tempem `SAFETY_CAR_WAIT_SPEED`, aby se nezměnily rozestupy) ->
+  `LEADING` (lídr je do `SAFETY_CAR_JOIN_DISTANCE` bodů od výjezdu: SC vyjede na trať, pole
+  se řadí a odlapuje; `safety_car_in_lane` = vykreslený v uličce, dokud nepřejede výjezd) ->
+  `ENDING` (podmínky konce splněné; SC dál jede po trati až k vjezdu do boxů; nová nehoda =
+  prodloužený timer vrátí fázi na LEADING) -> `PITTING` (SC zatočil do uličky - TEĎ se pole
+  uvolní, `safety_car_active=False`; SC dojede uličkou, `safety_car_lane_d`) -> `NONE`.
+  `safety_car_active` je True ve fázích WAITING/LEADING/ENDING, SC je vidět i v PITTING.
+  Vykreslení používá `pit_lane_position()` v uličce, jinak souřadnice racing_line. Pod SC se
+  ukazuje popisek fáze / počet odlapovaných aut a DRS je vypnuté (`update_drs`).
 - SC se také nesmí spouštět (ani z `generate_incident()`, ani z náhodného triggeru v
   `update()`) během `RACE_PHASE_FORMATION` – obojí je ošetřené podmínkou
   `self.race_phase != RACE_PHASE_FORMATION`.
@@ -212,6 +245,35 @@ se přeskočilo o 8 bodů dopředu (zisk pozice, ne ztráta). Teď:
   uličce vč. zastávky, čistá ztráta ~20-27 % kola - blízko realitě (20-25 s z ~80 s).
 - UI: tlačítko BOX u hráčových jezdců je červené (klid) / žluté (pit požadován, čeká na
   vjezd) / zelené (v uličce). Opětovné zadání pitu během průjezdu uličkou se ignoruje.
+
+## Panel pit stopu ("Boxová zeď") + rádio
+- Tlačítko BOX u hráčova jezdce **neobjednává pit rovnou**, otevře panel `_draw_pit_panel()`
+  (stav `pit_panel_open`; dřívější malý výběr gum `show_tire_select` je pryč). Panel jde
+  otevřít jen ve fázi `RACING` a jen jezdci, který jede (ne `in_pit`/DNF/v cíli). Je v něm:
+  záložky obou jezdců, aktuální guma + opotřebení + kol na sadě, zbývající kola, počasí,
+  5 karet gum (výdrž `~1/TIRE_WEAR_PER_LAP` kol, přilnavost `tire_grip()` při aktuální
+  vlhkosti, štítek DOPORUČENO z `recommended_tire()`), tlačítka **BOX THIS LAP** (objedná pit
+  na vybrané gumy: `next_tire` + `pit_requested`) a **STAY OUT** (zruší objednaný pit); X /
+  ESC panel jen zavře beze změny. Předvybraná guma = doporučená, u už objednaného pitu ta objednaná.
+- **Závod je při otevřeném panelu pozastavený**: `update()` se vrací při `pit_panel_open`
+  (nepoužívá `self.paused`, takže nekoliduje s PAUSE/ESC menu); `handle_events()` posílá
+  panelu veškerý vstup (`continue`). Na pozadí běží jen `_update_radio()` (reálný čas).
+- **Rádio** (`_start_radio`, `_update_radio`, `_draw_radio`): po *nově* objednaném pitu
+  (změna gum u už objednaného pitu rádio nespouští) se ukáže pruh "RÁDIO | jezdec | "BOX, BOX""
+  přes horní okraj mapy a zahraje se: úvod (globál `RADIO_INTRO_MODE` = `BEEP` /
+  `STRANGE` / `OFF`, cyklí se tlačítkem "ÚVOD RÁDIA" v Nastavení, po restartu se
+  nepamatuje) + po `RADIO_INTRO_GAP` náhodně jedna z `RADIO_VOICE_LINES`
+  ("Box, box" / "Box this lap"). Úvod delší než `RADIO_INTRO_MAX_WAIT` (3 s) hlášku nezdrží.
+- Soubory v `sounds/` (mp3/wav/ogg, hledá `find_sound_file(name)`): `radio_open`,
+  `box_box`, `box_this_lap`, u úvodu STRANGE `strange`. Chybějící soubor se přeskočí (a vypíše
+  varování do konzole), titulek se ukáže vždy. Hláška se losuje jen z těch, které mají soubor -
+  jinak by při jediné nahrávce půlka pit stopů proběhla potichu. Krátké zvuky jdou přes `pygame.mixer.Sound` (`load_sfx`, cache), takže
+  nepřeruší komentář / zvuk výhry přes `mixer.music`.
+- **Tempo směsí**: `TIRES[...]["speed"]` (SOFT 1.010, MEDIUM 1.000, HARD 0.990, INTER 0.985,
+  WET 0.975) násobí rychlost v `racing_speed()` (= základ auta × opotřebení × tempo směsi ×
+  přilnavost). Rozdíl SOFT-HARD 2 % je vyvážený ztrátou času na dalších zastávkách (SOFT stint ~9.5
+  kola, ztráta ~25 % kola za pit; celkový čas SOFT/MEDIUM/HARD vychází v rozmezí ~0.4 %),
+  žádná směs tedy není jednoznačně nejlepší. Panel ukazuje na kartě gumy Tempo / Výdrž / Přilnavost.
 
 ## Počasí a vlhkost trati (`WEATHER_TYPES` nahrazeno)
 - Počasí `SUN`/`CLOUD`/`RAIN` se každé `WEATHER_CHANGE_LAPS` (4) kola lídra mění podle
@@ -388,7 +450,7 @@ auto-save po závodě, in-game menu (ESC), Settings (FPS, Race Length, Language)
 
 ## TODO priority
 **Vysoká:** žádná otevřená (viz opravy výše).
-**Střední:** doplnit chybějící překlady hardcoded textů (např. "ULOŽENÉ HRY", "VYBER PNEUMATIKY"); pit stopy: double-stack (oba jezdci týmu se dvěma auty v boxu naráz
+**Střední:** doplnit chybějící překlady hardcoded textů (např. "ULOŽENÉ HRY"); pit stopy: double-stack (oba jezdci týmu se dvěma auty v boxu naráz
 nečekají na sebe), v uličce se nekontroluje kolize aut; počasí: bez předpovědi.
 **Střední (k ověření s uživatelem):** `load_game()` obnoví jezdce (kola, pozice, gumy...) a hned
 potom zavolá `_load_race()`, které je celé resetuje - reálně se tedy načte jen šampionát

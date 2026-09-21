@@ -69,6 +69,35 @@ RACE_PHASE_RACING = "RACING"
 START_COMMENT_CS = os.path.join(SCRIPT_DIR, "sounds", "start_cz.mp3")
 START_COMMENT_EN = os.path.join(SCRIPT_DIR, "sounds", "start_en.mp3")
 
+# Zvuk po výhře jezdce hráčova týmu (přehraje se při dojetí závodu, viz finish_race).
+# Stačí vložit soubor do složky sounds/ - když žádný neexistuje, hra jede tiše dál:
+#   win_cz.mp3  - pro češtinu       win_en.mp3  - pro ostatní jazyky
+#   win.mp3     - jedno společné audio (použije se, když chybí soubor pro daný jazyk)
+WIN_SOUND_CS = os.path.join(SCRIPT_DIR, "sounds", "win_cz.mp3")
+WIN_SOUND_EN = os.path.join(SCRIPT_DIR, "sounds", "win_en.mp3")
+WIN_SOUND_ANY = os.path.join(SCRIPT_DIR, "sounds", "win.mp3")
+
+# "Strange sound" - vlastní zvuk, který si hráč vloží sám (sounds/strange.mp3) a zapne v
+# Nastavení. Když je zapnutý, přehraje se místo běžného zvuku výhry: po výhře jezdce hráčova
+# týmu v závodě a na konci sezóny po titulu v poháru konstruktérů / v šampionátu jezdců.
+STRANGE_SOUND = os.path.join(SCRIPT_DIR, "sounds", "strange.mp3")
+STRANGE_SOUND_ENABLED = False
+
+# === RÁDIO BOXOVÉ ZDI (po "BOX THIS LAP" v panelu pit stopu) ===
+# Krátké zvuky se přehrávají přes pygame.mixer.Sound (vlastní kanály), takže nepřeruší
+# komentář / zvuk výhry, který jede přes mixer.music. Soubory (mp3/wav/ogg) doplní uživatel
+# do sounds/, chybějící se přeskočí a hláška se ukáže jen jako titulek:
+#   radio_open  - pípnutí otevřeného rádia (jako v F1 Live)
+#   box_box, box_this_lap - namluvené hlášky, vybere se náhodně jedna
+RADIO_INTRO_BEEP = "radio_open"
+RADIO_VOICE_LINES = [("BOX, BOX, BOX, BOX, BOX, BOX, BOX, BOX", "box_box"), ("BOX THIS LAP, BOX THIS LAP", "box_this_lap")]
+RADIO_INTRO_MODES = ["BEEP", "STRANGE", "OFF"]     # co zazní před hláškou (cyklí se v Nastavení)
+RADIO_INTRO_MODE = "BEEP"
+RADIO_INTRO_GAP = 0.15         # pauza mezi úvodním zvukem a hláškou (s)
+RADIO_INTRO_MAX_WAIT = 3.0     # delší úvodní zvuk (strange sound) hlášku nezdrží, přehraje se přes něj
+RADIO_MIN_DISPLAY = 3.5        # nejkratší doba, po kterou je titulek rádia vidět (s)
+SOUND_EXTENSIONS = (".mp3", ".wav", ".ogg")
+
 # === LOKALIZACE - SNADNO ROZŠIŘITELNÁ ===
 TEXTS = {
     # Hlavní menu a nastavení
@@ -100,6 +129,10 @@ TEXTS = {
     "Opotřebení kol:": {"CS": "Opotřebení kol:", "EN": "Tire Wear:", "IT": "USURA DELLE RUOTE"},
     "FORMATION LAP": {"CS": "FORMACE KOLO", "EN": "FORMATION LAP", "IT": "GIRO DI FORMAZIONE"},
     "FLAG_SC": {"CS": "SAFETY CAR", "EN": "SAFETY CAR", "IT": "SAFETY CAR"},
+    "SC_WAITING": {"CS": "SC vyjíždí z boxů", "EN": "SC leaving the pits", "IT": "SC in uscita dai box"},
+    "SC_UNLAPPING": {"CS": "Odlapování aut:", "EN": "Lapped cars unlapping:", "IT": "Doppiati in recupero:"},
+    "SC_ENDING": {"CS": "SC zajíždí do boxů", "EN": "SC in this lap", "IT": "SC rientra ai box"},
+    "TIRE PACE": {"CS": "Tempo", "EN": "Pace", "IT": "Ritmo"},
     "FLAG_VSC": {"CS": "VIRTUÁLNÍ SC", "EN": "VIRTUAL SC", "IT": "SC VIRTUALE"},
     "FLAG_YELLOW": {"CS": "ŽLUTÁ VLAJKA", "EN": "YELLOW FLAG", "IT": "BANDIERA GIALLA"},
     "RACE FINISH": {"CS": "VÝSLEDKY ZÁVODU", "EN": "RACE FINISH", "IT": "ARRIVO DELLA GARA"},
@@ -120,6 +153,28 @@ TEXTS = {
     "FULLSCREEN": {"CS": "CELÁ OBRAZOVKA", "EN": "FULLSCREEN", "IT": "SCHERMO INTERO"},
     "ON": {"CS": "ZAP", "EN": "ON", "IT": "ON"},
     "OFF": {"CS": "VYP", "EN": "OFF", "IT": "OFF"},
+    "STRANGE SOUND": {"CS": "STRANGE SOUND", "EN": "STRANGE SOUND", "IT": "STRANGE SOUND"},
+    "RADIO INTRO": {"CS": "ÚVOD RÁDIA", "EN": "RADIO INTRO", "IT": "INTRO RADIO"},
+    "RADIO_BEEP": {"CS": "PÍPNUTÍ RÁDIA", "EN": "RADIO BEEP", "IT": "BIP RADIO"},
+    "RADIO_STRANGE": {"CS": "STRANGE SOUND", "EN": "STRANGE SOUND", "IT": "STRANGE SOUND"},
+    "RADIO_OFF": {"CS": "VYP", "EN": "OFF", "IT": "OFF"},
+    "RADIO": {"CS": "RÁDIO", "EN": "RADIO", "IT": "RADIO"},
+    "PIT WALL": {"CS": "BOXOVÁ ZEĎ", "EN": "PIT WALL", "IT": "MURETTO BOX"},
+    "NEW TIRES": {"CS": "NOVÉ PNEUMATIKY", "EN": "NEW TIRES", "IT": "PNEUMATICI NUOVI"},
+    "TIRE LIFE": {"CS": "Výdrž", "EN": "Life", "IT": "Durata"},
+    "TIRE GRIP": {"CS": "Přilnavost", "EN": "Grip", "IT": "Aderenza"},
+    "APPROX LAPS": {"CS": "kol", "EN": "laps", "IT": "giri"},
+    "RECOMMENDED": {"CS": "DOPORUČENO", "EN": "RECOMMENDED", "IT": "CONSIGLIATE"},
+    "STINT LAPS": {"CS": "Kol na sadě:", "EN": "Laps on set:", "IT": "Giri sul set:"},
+    "LAPS LEFT": {"CS": "Do konce:", "EN": "Laps left:", "IT": "Giri rimasti:"},
+    "BOX THIS LAP": {"CS": "BOX THIS LAP", "EN": "BOX THIS LAP", "IT": "BOX THIS LAP"},
+    "STAY OUT": {"CS": "STAY OUT", "EN": "STAY OUT", "IT": "STAY OUT"},
+    "PIT REQUESTED": {"CS": "Pit stop objednán na:", "EN": "Pit stop requested for:", "IT": "Pit stop richiesto per:"},
+    "IN PITS": {"CS": "V BOXECH", "EN": "IN PITS", "IT": "AI BOX"},
+    "FINISHED": {"CS": "V CÍLI", "EN": "FINISHED", "IT": "ARRIVATO"},
+    "PIT WALL HINT": {"CS": "Závod je pozastaven, dokud je panel otevřený  (ESC = zavřít)",
+                      "EN": "The race is paused while this panel is open  (ESC = close)",
+                      "IT": "La gara è in pausa finché il pannello è aperto  (ESC = chiudi)"},
     "TEST MODE": {"CS": "TESTOVACÍ REŽIM", "EN": "TEST MODE", "IT": "MODALITÀ TEST"},
     "TEST MODE LAPS": {"CS": "Počet kol", "EN": "Laps", "IT": "Giri"},
     "TEST MODE HINT": {"CS": "Zkrátí závody - platí od dalšího načtení závodu", "EN": "Shortens races - applies from the next race load", "IT": "Accorcia le gare - vale dal prossimo caricamento"},
@@ -136,6 +191,72 @@ TEXTS = {
     "JAZYK": {"CS": "JAZYK", "EN": "LANGUAGE", "IT": "LINGUA"},
     "FRAMERATE (FPS)": {"CS": "FRAMERATE (FPS)", "EN": "FRAMERATE (FPS)", "IT": "FREQUENZA DEI FRAME"},
 }
+
+def play_first_existing_sound(paths, label):
+    """Přehraje první existující soubor ze seznamu. Vrací True, když se něco přehrálo.
+
+    Chybějící soubor ani nefunkční audio (školní PC bez zvuku) hru nikdy nezastaví."""
+    for path in paths:
+        if os.path.exists(path):
+            try:
+                pygame.mixer.music.load(path)
+                pygame.mixer.music.play()
+                print(f"▶️ Přehrávám: {label} ({os.path.basename(path)})")
+                return True
+            except Exception as e:
+                print(f"❌ Chyba při přehrávání audia ({label}): {e}")
+                return False
+    print(f"⚠️ Audio '{label}' nenalezeno v 'sounds/' složce")
+    return False
+
+
+def stop_sound():
+    try:
+        pygame.mixer.music.stop()
+    except Exception:
+        pass
+
+
+def find_sound_file(name):
+    """Cesta k sounds/<name>.mp3|wav|ogg (první existující), jinak None."""
+    for ext in SOUND_EXTENSIONS:
+        path = os.path.join(SCRIPT_DIR, "sounds", name + ext)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+_SFX_CACHE = {}
+
+
+def load_sfx(path):
+    """Krátký zvukový efekt jako pygame.mixer.Sound (s cache). None, když soubor chybí
+    nebo nejde audio - hra kvůli tomu nikdy nespadne."""
+    if not path or not AUDIO_ENABLED:
+        return None
+    if path not in _SFX_CACHE:
+        try:
+            _SFX_CACHE[path] = pygame.mixer.Sound(path)
+        except Exception as e:
+            print(f"❌ Zvuk se nepodařilo načíst ({os.path.basename(path)}): {e}")
+            _SFX_CACHE[path] = None
+    return _SFX_CACHE[path]
+
+
+def recommended_tire(race, driver):
+    """Doporučené pneumatiky pro panel pit stopu: podle vlhkosti trati, jinak podle
+    toho, kolik kol zbývá (co nejměkčí směs, která to ještě dojede)."""
+    if race.track_wetness >= AI_WET_TIRE_WETNESS:
+        return "WET"
+    if race.track_wetness >= AI_INTER_WETNESS:
+        return "INTER"
+    remaining = race.current_track["laps"] - driver.current_lap
+    if remaining <= 11:
+        return "SOFT"
+    if remaining <= 17:
+        return "MEDIUM"
+    return "HARD"
+
 
 def format_race_time(seconds):
     """Čas závodu jako h:mm:ss.s nebo m:ss.s (stejné jednotky jako "Čas:" v hlavičce závodu)."""
@@ -240,12 +361,18 @@ current_screen = None
 
 WEATHER_CHANGE_LAPS = 4  # jak často (v odjetých kolech lídra) se losuje nové počasí
 
+# "speed" = násobek rychlosti auta na dané směsi (viz racing_speed). Měkčí guma je rychlejší,
+# ale ničí se rychleji (TIRE_WEAR_PER_LAP) - víc zastávek. Rozdíl SOFT-HARD 2 % je zhruba
+# vyvážený ztrátou času na dalších pit stopech (ztráta ~25 % kola za zastávku, stint SOFT
+# ~9.5 kola oproti HARD ~21), takže žádná směs není jednoznačně nejlepší. INTER/WET jsou
+# na suché trati pomalejší; na mokru je zvýhodní tire_grip(). ("wear" tu se nepoužívá -
+# opotřebení řídí TIRE_WEAR_PER_LAP.)
 TIRES = {
-    "SOFT": {"pace": -0.3, "wear": 0.04},
-    "MEDIUM": {"pace": 0.0, "wear": 0.025},
-    "HARD": {"pace": 0.3, "wear": 0.015},
-    "INTER": {"pace": 0.6, "wear": 0.02},
-    "WET": {"pace": 1.0, "wear": 0.018},
+    "SOFT": {"speed": 1.010, "wear": 0.04},
+    "MEDIUM": {"speed": 1.000, "wear": 0.025},
+    "HARD": {"speed": 0.990, "wear": 0.015},
+    "INTER": {"speed": 0.985, "wear": 0.02},
+    "WET": {"speed": 0.975, "wear": 0.018},
 }
 
 # Opotřebení za JEDNO dojeté kolo při NEUTRAL tempu (viz update() - škáluje se
@@ -405,12 +532,24 @@ class Driver: # jezdec
         self.dnf_reason = None              # "Engine", "Fuel", "Crash", "Spin"
         self.incident_cooldown = 0
 
+def racing_speed(driver, race):
+    """Rychlost auta při normálním závodním tempu (bez SC, boxů a DRS): základ auta,
+    opotřebení, tempo směsi a přilnavost gum na aktuální vlhkosti trati."""
+    speed = driver.base_speed
+    speed *= (1 - driver.tire_wear * 0.4)
+    speed *= TIRES[driver.tire]["speed"]
+    speed *= tire_grip(driver.tire, race.track_wetness)
+    return speed
+
+
 def get_speed(driver, race):
     """Vrátí rychlost jezdce s ohledem na Safety Car a formační kolo"""
     if race.safety_car_active and not driver.in_pit:
         # Auta mimo pit jedou pod SC rychlostí danou frontou za safety carem
-        # (viz ChampionshipScreen.update_safety_car / get_safety_car_speed)
-        return race.get_safety_car_speed(driver)
+        # (viz ChampionshipScreen.update_safety_car_queue / get_safety_car_speed).
+        # Nikdy ale rychleji, než by jelo ve skutečném závodním tempu - odlapující se
+        # auto tak nelétá kolem koloně rychlostí, kterou by v závodě nikdy nemělo.
+        return min(race.get_safety_car_speed(driver), racing_speed(driver, race))
 
     if driver.pit_phase == "SERVICE":
         return 0.0  # stojí u svého boxu (výměna pneumatik)
@@ -436,10 +575,7 @@ def get_speed(driver, race):
         # závodu, proto se tu dělení time_compression předem "vyruší".
         return pace / getattr(race, 'time_compression', 1.0)
 
-    speed = driver.base_speed
-    speed *= (1 - driver.tire_wear * 0.4)
-
-    speed *= tire_grip(driver.tire, race.track_wetness)
+    speed = racing_speed(driver, race)
 
     if driver.in_pit:
         speed *= 0.4
@@ -587,6 +723,10 @@ SAFETY_CAR_LEADER_GAP = 2.5        # cílový odstup lídra od SC (ve stejných 
 SAFETY_CAR_CAR_GAP = 1.6           # cílový odstup mezi jednotlivými auty ve frontě
 SAFETY_CAR_MAX_CATCHUP_TIME = 25.0  # i auto ztracené o celé kolo dožene frontu nejpozději za tolik sekund
 SAFETY_CAR_LINEUP_TOLERANCE = 2.0  # největší dovolená mezera od cílové pozice, aby se pole považovalo za seřazené
+# SC vyjíždí z boxové uličky a na konci do ní zase zajíždí (fáze WAITING -> LEADING -> ENDING -> PITTING):
+SAFETY_CAR_WAIT_SPEED = 0.6        # tempo všech aut, než SC vyjede z boxů (stejné pro všechny = zachová rozestupy)
+SAFETY_CAR_JOIN_DISTANCE = 8.0     # SC vyjede z uličky, až je lídr tolik bodů před jejím koncem
+SAFETY_CAR_EXIT_RUN = 1.2          # SC čeká kousek před koncem uličky (aby se plynule zařadil na trať)
 
 #Ai si vybíra kola
 def ai_choose_tire(driver, race):
@@ -877,7 +1017,9 @@ class ChampionshipScreen(Screen):
         self.safety_car_progress = 0.0
         self.safety_car_laps = 0          # kumulativní počet průjezdů SC (pro porovnání pozic s jezdci)
         self.safety_car_lined_up = False  # True, jakmile je celé pole seřazené ve vláčku za SC
-        self.safety_car_phase = "NONE"    # "DEPLOYED", "LEADING", "ENDING"
+        self.safety_car_phase = "NONE"    # "WAITING" (v boxech), "LEADING", "ENDING" (jede k vjezdu do boxů), "PITTING" (v uličce)
+        self.safety_car_in_lane = False   # SC je vykreslený v boxové uličce (ne na trati)
+        self.safety_car_lane_d = 0.0      # kde v uličce (body od vjezdu) SC právě je - jen ve fázi PITTING
 
         self.selected_driver = None
         self.time_scale = 1
@@ -892,9 +1034,19 @@ class ChampionshipScreen(Screen):
         self.pit_button2 = None
         self.start_season_button = None
 
-        self.show_tire_select = False
-        self.tire_select_for = None
-        self.tire_select_buttons = []
+        # Panel pit stopu (otevře se tlačítkem BOX, závod je při něm pozastavený)
+        self.font_panel = pygame.font.SysFont("arial", 30)
+        self.font_panel_big = pygame.font.SysFont("arial", 44, bold=True)
+        self.pit_panel_open = False
+        self.pit_panel_driver = 0          # index jezdce v player_team.drivers
+        self.pit_panel_tire = "MEDIUM"     # vybraná (zatím nepotvrzená) směs
+        self.pit_panel_tabs = []
+        self.pit_panel_tire_buttons = []
+        self.pit_panel_box_button = None
+        self.pit_panel_stay_button = None
+        self.pit_panel_close_button = None
+        self._dim_overlay = None
+        self.radio = None                  # právě běžící rádiová hláška boxové zdi
 
         # === UKLÁDÁNÍ HRY ===
         self.save_message = ""
@@ -982,6 +1134,9 @@ class ChampionshipScreen(Screen):
             print(f"Chyba načtení mapy: {e}")
             self.track_image = None
 
+        self.pit_panel_open = False
+        self.radio = None
+
         # Reset jezdců
         for driver in self.drivers:
             driver.track_index = 0
@@ -1026,6 +1181,8 @@ class ChampionshipScreen(Screen):
         self.safety_car_progress = 0.0
         self.safety_car_laps = 0
         self.safety_car_lined_up = False
+        self.safety_car_phase = "NONE"
+        self.safety_car_in_lane = False
         self.vsc_active = False
         self.yellow_flag_active = False
 
@@ -1060,12 +1217,33 @@ class ChampionshipScreen(Screen):
         for team in self.teams.values():
             team.update_points()
 
+        # Vyhrál jezdec týmu, který si hráč vybral -> přehrát zvuk výhry.
+        # Po posledním závodě sezóny se navíc počítá titul konstruktérů / jezdců hráčova týmu.
+        race_win = bool(finished_drivers and self.player_team
+                        and finished_drivers[0].team_name == self.player_team.name)
+        title_won = self._player_won_championship()
+        strange_played = (STRANGE_SOUND_ENABLED and (race_win or title_won)
+                          and play_first_existing_sound([STRANGE_SOUND], "strange sound"))
+        if race_win and not strange_played:   # bez strange.mp3 zůstane běžný zvuk výhry
+            self._play_win_sound()
+
         # === AUTOMATICKÉ ULOŽENÍ PO ZÁVODĚ ===
         self.save_game(slot=1)   # uloží do slotu 1
         print("💾 Automatické uložení po závodě provedeno.")
 
+    def _player_won_championship(self):
+        """True, když je právě dojetý závod posledním v sezóně a hráčův tým vyhrál pohár
+        konstruktérů, nebo jeho jezdec šampionát jezdců (pořadí stejné jako ve výsledkovém okně)."""
+        if not self.player_team or self.current_race_index + 1 < len(CALENDAR_2025):
+            return False
+        best_team = max(self.teams.values(), key=lambda t: t.points)
+        best_driver = max(self.drivers, key=lambda d: d.points)
+        return (best_team.name == self.player_team.name
+                or best_driver.team_name == self.player_team.name)
+
     def leave_results(self):
         """Tlačítko "Další závod" na výsledkovém okně (po posledním závodě návrat do menu)."""
+        stop_sound()   # dohrávající zvuk výhry nemá pokračovat do dalšího závodu
         if self.current_race_index + 1 >= len(CALENDAR_2025):
             change_screen(GAME_STATE_MENU)
         else:
@@ -1192,6 +1370,8 @@ class ChampionshipScreen(Screen):
             self.safety_car_progress = 0.0
             self.safety_car_laps = 0
             self.safety_car_lined_up = False
+            self.safety_car_phase = "LEADING" if self.safety_car_active else "NONE"
+            self.safety_car_in_lane = False
             self.vsc_active = save_data["vsc_active"]
             self.vsc_timer = save_data["vsc_timer"]
             self.yellow_flag_active = save_data["yellow_flag_active"]
@@ -1274,7 +1454,9 @@ class ChampionshipScreen(Screen):
         self.paused = True
 
     def update(self, delta_time):
-        if self.paused or not self.current_track or self.race_finished:
+        self._update_radio(delta_time)   # běží v reálném čase, i když je závod pozastavený
+        # Otevřený panel pit stopu závod pozastaví (jako v F1 Manageru)
+        if self.paused or self.pit_panel_open or not self.current_track or self.race_finished:
             return
         
         if self.save_message_timer > 0:
@@ -1316,24 +1498,7 @@ class ChampionshipScreen(Screen):
         path = self.current_track["racing_line"]
         path_len = len(path)
 
-        if self.safety_car_active:
-            self.safety_car_timer -= delta_time
-            # Pohyb Safety Caru (stejné tempo jako auta v koloně za ním)
-            self.safety_car_progress += SAFETY_CAR_PACE * getattr(self, 'time_compression', 1.0) * delta_time
-            while self.safety_car_progress >= 1.0:
-                self.safety_car_progress -= 1.0
-                self.safety_car_index = (self.safety_car_index + 1) % path_len
-                if self.safety_car_index == 0:
-                    self.safety_car_laps += 1
-
-            self.update_safety_car_queue()
-
-            if self.safety_car_timer <= 0 and self.safety_car_lined_up:
-                self.safety_car_active = False
-                self.safety_car_lined_up = False
-                print("🏁 SAFETY CAR IN - Závod pokračuje!")
-        else:
-            self._sc_speed_overrides = {}
+        self._update_safety_car(delta_time, path_len)
 
         if self.vsc_active:
             self.vsc_timer -= delta_time
@@ -1497,47 +1662,363 @@ class ChampionshipScreen(Screen):
                 driver.pit_phase = None
                 driver.pit_timer = 0.0
 
+    # === PANEL PIT STOPU + RÁDIO BOXOVÉ ZDI ===
+    def _pit_panel_available(self, driver):
+        """Pit stop jde objednat jen v závodní fázi a jen jezdci, který jede."""
+        return (self.race_phase == RACE_PHASE_RACING and not driver.in_pit
+                and not driver.is_dnf and not driver.finished)
+
+    def _open_pit_panel(self, index):
+        driver = self.player_team.drivers[index]
+        if not self._pit_panel_available(driver):
+            return
+        self.pit_panel_open = True
+        self.pit_panel_driver = index
+        self.pit_panel_tire = driver.next_tire if driver.pit_requested else recommended_tire(self, driver)
+
+    def _confirm_pit(self):
+        """Tlačítko BOX THIS LAP: objedná pit stop na vybrané pneumatiky, zavře panel
+        (závod jede dál) a poprvé pustí rádio. Změna gum u už objednaného pitu rádio nespouští."""
+        driver = self.player_team.drivers[self.pit_panel_driver]
+        self.pit_panel_open = False
+        if not self._pit_panel_available(driver):
+            return
+        newly_requested = not driver.pit_requested
+        driver.next_tire = self.pit_panel_tire
+        driver.pit_requested = True
+        if newly_requested:
+            self._start_radio(driver)
+
+    def _cancel_pit(self):
+        """Tlačítko STAY OUT: zruší objednaný pit stop a zavře panel."""
+        driver = self.player_team.drivers[self.pit_panel_driver]
+        self.pit_panel_open = False
+        if not driver.in_pit:
+            driver.pit_requested = False
+
+    def _handle_pit_panel_click(self, pos):
+        if self.pit_panel_close_button and self.pit_panel_close_button.collidepoint(pos):
+            self.pit_panel_open = False
+        elif self.pit_panel_box_button and self.pit_panel_box_button.collidepoint(pos):
+            self._confirm_pit()
+        elif self.pit_panel_stay_button and self.pit_panel_stay_button.collidepoint(pos):
+            self._cancel_pit()
+        else:
+            for i, rect in enumerate(self.pit_panel_tabs):
+                if rect.collidepoint(pos):
+                    self._open_pit_panel(i)
+                    return
+            for rect, tire in self.pit_panel_tire_buttons:
+                if rect.collidepoint(pos):
+                    self.pit_panel_tire = tire
+                    return
+
+    def _start_radio(self, driver):
+        """Rádio z boxové zdi: úvodní zvuk (pípnutí / strange sound / nic), pak náhodně
+        "Box, box" nebo "Box this lap". Bez souborů se ukáže jen titulek."""
+        # Losuje se jen z hlášek, které mají nahraný soubor - jinak by se při chybějící
+        # nahrávce půlka pit stopů odbyla v tichu ("audio se někdy spustí a někdy ne").
+        lines = [(text, name, find_sound_file(name)) for text, name in RADIO_VOICE_LINES]
+        for text, name, path in lines:
+            if not path:
+                print(f"⚠️ Rádio: chybí sounds/{name}.mp3 (nebo .wav/.ogg)")
+        text, _, voice_path = random.choice([l for l in lines if l[2]] or lines)
+        intro = None
+        if RADIO_INTRO_MODE == "BEEP":
+            intro_path = find_sound_file(RADIO_INTRO_BEEP)
+            if not intro_path:
+                print(f"⚠️ Rádio: chybí sounds/{RADIO_INTRO_BEEP}.mp3 (nebo .wav/.ogg) - úvodní pípnutí bude vynecháno")
+            intro = load_sfx(intro_path)
+        elif RADIO_INTRO_MODE == "STRANGE":
+            intro_path = find_sound_file("strange")
+            if not intro_path:
+                print("⚠️ Rádio: chybí sounds/strange.mp3 (nebo .wav/.ogg) - úvodní zvuk bude vynechán")
+            intro = load_sfx(intro_path)
+        voice = load_sfx(voice_path)
+
+        voice_at = 0.0
+        if intro:
+            try:
+                intro.play()
+                voice_at = min(intro.get_length(), RADIO_INTRO_MAX_WAIT) + RADIO_INTRO_GAP
+            except Exception as e:
+                print(f"❌ Chyba při přehrávání rádia: {e}")
+        voice_len = voice.get_length() if voice else 0.0
+        print(f"📻 Rádio: {driver.name} – {text}")
+        self.radio = {
+            "driver": driver, "text": text, "voice": voice, "voice_at": voice_at,
+            "voice_played": voice is None, "elapsed": 0.0,
+            "duration": max(RADIO_MIN_DISPLAY, voice_at + voice_len + 1.0),
+        }
+
+    def _update_radio(self, delta_time):
+        radio = self.radio
+        if not radio:
+            return
+        radio["elapsed"] += delta_time
+        if not radio["voice_played"] and radio["elapsed"] >= radio["voice_at"]:
+            radio["voice_played"] = True
+            try:
+                radio["voice"].play()
+            except Exception as e:
+                print(f"❌ Chyba při přehrávání rádia: {e}")
+        if radio["elapsed"] >= radio["duration"]:
+            self.radio = None
+
+    def _draw_radio(self, screen):
+        """Pruh rádia přes horní okraj mapy (jako radio message v F1 Live)."""
+        radio = self.radio
+        if not radio:
+            return
+        rect = pygame.Rect(480, 118, 730, 62)
+        bar = pygame.Surface(rect.size)
+        bar.set_alpha(225)
+        bar.fill((10, 10, 20))
+        screen.blit(bar, rect.topleft)
+        team_color = self.teams[radio["driver"].team_name].color
+        pygame.draw.rect(screen, team_color, (rect.x, rect.y, 8, rect.height))
+        pygame.draw.rect(screen, (255, 255, 255), rect, 2)
+        if (pygame.time.get_ticks() // 400) % 2 == 0:       # blikající "on air" tečka
+            pygame.draw.circle(screen, (255, 50, 50), (rect.x + 30, rect.centery), 7)
+        screen.blit(self.font_small.render(f"{get_text('RADIO')}  |  {radio['driver'].name}", True, (180, 180, 200)),
+                    (rect.x + 48, rect.y + 7))
+        screen.blit(self.font_big.render(f"\"{radio['text']}\"", True, (255, 255, 255)),
+                    (rect.x + 48, rect.y + 26))
+
+    def _draw_pit_panel(self, screen):
+        if self._dim_overlay is None:
+            self._dim_overlay = pygame.Surface((WIDTH, HEIGHT))
+            self._dim_overlay.set_alpha(190)
+            self._dim_overlay.fill((0, 0, 0))
+        screen.blit(self._dim_overlay, (0, 0))
+
+        px, py, pw, ph = 410, 90, 1100, 880
+        panel = pygame.Rect(px, py, pw, ph)
+        pygame.draw.rect(screen, (18, 18, 32), panel)
+        pygame.draw.rect(screen, (255, 140, 0), panel, 5)
+
+        drivers = self.player_team.drivers
+        driver = drivers[self.pit_panel_driver]
+        tire_colors = {"SOFT": (255, 60, 60), "MEDIUM": (255, 180, 0), "HARD": (220, 220, 220),
+                       "INTER": (0, 180, 255), "WET": (30, 80, 255)}
+
+        screen.blit(self.font_panel_big.render(get_text("PIT WALL"), True, (255, 140, 0)), (px + 40, py + 22))
+        self.pit_panel_close_button = pygame.Rect(px + pw - 80, py + 20, 50, 50)
+        pygame.draw.rect(screen, (60, 60, 80), self.pit_panel_close_button)
+        pygame.draw.rect(screen, (255, 255, 255), self.pit_panel_close_button, 2)
+        x_txt = self.font_panel.render("X", True, (255, 255, 255))
+        screen.blit(x_txt, x_txt.get_rect(center=self.pit_panel_close_button.center))
+
+        # Záložky jezdců
+        self.pit_panel_tabs = []
+        for i, d in enumerate(drivers):
+            rect = pygame.Rect(px + 40 + i * 520, py + 95, 500, 60)
+            self.pit_panel_tabs.append(rect)
+            active = i == self.pit_panel_driver
+            pygame.draw.rect(screen, (50, 50, 80) if active else (28, 28, 45), rect)
+            pygame.draw.rect(screen, self.teams[d.team_name].color if active else (90, 90, 110), rect, 5 if active else 2)
+            if d.is_dnf:
+                status = "DNF"
+            elif d.finished:
+                status = get_text("FINISHED")
+            elif d.in_pit:
+                status = get_text("IN PITS")
+            else:
+                status = ""
+            label = self.font_panel.render(f"{i + 1}. {d.name}", True, (255, 255, 255) if not status else (130, 130, 150))
+            screen.blit(label, (rect.x + 16, rect.centery - label.get_height() // 2))
+            if status:
+                st = self.font.render(status, True, (255, 160, 60))
+                screen.blit(st, (rect.right - st.get_width() - 14, rect.centery - st.get_height() // 2))
+
+        # Stav aktuálních gum
+        laps_total = self.current_track["laps"]
+        tire_color = tire_colors.get(driver.tire, (200, 200, 200))
+        pygame.draw.rect(screen, tire_color, (px + 40, py + 185, 44, 44))
+        pygame.draw.rect(screen, (255, 255, 255), (px + 40, py + 185, 44, 44), 2)
+        screen.blit(self.font_panel.render(f"{get_text('Gumy:')} {driver.tire}", True, (255, 215, 0)), (px + 100, py + 190))
+
+        wear = max(0.0, min(1.0, driver.tire_wear))
+        bar = pygame.Rect(px + 40, py + 250, 600, 26)
+        pygame.draw.rect(screen, (40, 40, 60), bar)
+        wear_color = (0, 200, 90) if wear < 0.5 else (255, 190, 0) if wear < 0.8 else (230, 60, 60)
+        pygame.draw.rect(screen, wear_color, (bar.x, bar.y, int(bar.width * wear), bar.height))
+        pygame.draw.rect(screen, (255, 255, 255), bar, 2)
+        screen.blit(self.font.render(f"{get_text('Opotřebení kol:')} {int(wear * 100)} %     "
+                                     f"{get_text('STINT LAPS')} {driver.current_stint_laps}",
+                                     True, (220, 220, 235)), (px + 40, py + 285))
+
+        info_x = px + 690
+        screen.blit(self.font.render(f"{get_text('Kolo')} {min(driver.current_lap, laps_total)}/{laps_total}", True, (255, 255, 255)), (info_x, py + 190))
+        screen.blit(self.font.render(f"{get_text('LAPS LEFT')} {max(0, laps_total - driver.current_lap)}", True, (255, 255, 255)), (info_x, py + 225))
+        screen.blit(self.font.render(f"{get_text('WEATHER_' + self.current_weather)}, {get_text('Vlhkost trati:')} {int(self.track_wetness * 100)} %",
+                                     True, (100, 255, 255)), (info_x, py + 260))
+
+        # Výběr nových gum
+        screen.blit(self.font_big.render(get_text("NEW TIRES"), True, (255, 255, 255)), (px + 40, py + 335))
+        recommended = recommended_tire(self, driver)
+        self.pit_panel_tire_buttons = []
+        for i, tire in enumerate(["SOFT", "MEDIUM", "HARD", "INTER", "WET"]):
+            card = pygame.Rect(px + 20 + i * 215, py + 385, 200, 320)
+            self.pit_panel_tire_buttons.append((card, tire))
+            selected = tire == self.pit_panel_tire
+            pygame.draw.rect(screen, (30, 30, 50), card)
+            pygame.draw.rect(screen, tire_colors[tire], (card.x, card.y, card.width, 70))
+            name = self.font_panel_big.render(tire, True, (0, 0, 0))
+            screen.blit(name, name.get_rect(center=(card.centerx, card.y + 35)))
+            pace = (TIRES[tire]["speed"] - 1.0) * 100
+            pace_text = f"{pace:+.1f} %" if abs(pace) > 0.05 else "0.0 %"
+            pace_color = (0, 220, 110) if pace > 0.05 else (255, 190, 0) if pace > -1.2 else (230, 70, 70)
+            life = int(round(1 / TIRE_WEAR_PER_LAP[tire]))
+            grip = int(tire_grip(tire, self.track_wetness) * 100)
+            grip_color = (0, 220, 110) if grip >= 90 else (255, 190, 0) if grip >= 70 else (230, 70, 70)
+            screen.blit(self.font.render(get_text("TIRE PACE"), True, (170, 170, 190)), (card.x + 14, card.y + 85))
+            screen.blit(self.font_panel.render(pace_text, True, pace_color), (card.x + 14, card.y + 112))
+            screen.blit(self.font.render(get_text("TIRE LIFE"), True, (170, 170, 190)), (card.x + 14, card.y + 155))
+            screen.blit(self.font_panel.render(f"~{life} {get_text('APPROX LAPS')}", True, (255, 255, 255)), (card.x + 14, card.y + 182))
+            screen.blit(self.font.render(get_text("TIRE GRIP"), True, (170, 170, 190)), (card.x + 14, card.y + 225))
+            screen.blit(self.font_panel.render(f"{grip} %", True, grip_color), (card.x + 14, card.y + 252))
+            if tire == recommended:
+                rec = self.font_small.render(get_text("RECOMMENDED"), True, (0, 230, 110))
+                screen.blit(rec, rec.get_rect(midbottom=(card.centerx, card.bottom - 10)))
+            pygame.draw.rect(screen, (0, 255, 0) if selected else (110, 110, 130), card, 6 if selected else 2)
+
+        # Stav objednávky
+        if driver.pit_requested:
+            screen.blit(self.font_panel.render(f"{get_text('PIT REQUESTED')} {driver.next_tire}", True, (255, 190, 0)), (px + 40, py + 716))
+        else:
+            screen.blit(self.font_small.render(get_text("PIT WALL HINT"), True, (150, 150, 170)), (px + 40, py + 724))
+
+        # Tlačítka
+        self.pit_panel_box_button = pygame.Rect(px + 40, py + 760, 640, 80)
+        pygame.draw.rect(screen, (0, 170, 80), self.pit_panel_box_button)
+        pygame.draw.rect(screen, (255, 255, 255), self.pit_panel_box_button, 4)
+        txt = self.font_panel_big.render(get_text("BOX THIS LAP"), True, (255, 255, 255))
+        screen.blit(txt, txt.get_rect(center=self.pit_panel_box_button.center))
+
+        self.pit_panel_stay_button = pygame.Rect(px + 720, py + 760, 340, 80)
+        pygame.draw.rect(screen, (120, 45, 45), self.pit_panel_stay_button)
+        pygame.draw.rect(screen, (255, 255, 255), self.pit_panel_stay_button, 4)
+        txt = self.font_panel_big.render(get_text("STAY OUT"), True, (255, 255, 255))
+        screen.blit(txt, txt.get_rect(center=self.pit_panel_stay_button.center))
+
     def _play_start_comment(self):
         if self.start_audio_played:
             return
         self.start_audio_played = True
-        try:
-            if CURRENT_LANGUAGE == "CS" and os.path.exists(START_COMMENT_CS):
-                pygame.mixer.music.load(START_COMMENT_CS)
-                print("▶️ Přehrávám český start komentář")
-            elif os.path.exists(START_COMMENT_EN):
-                pygame.mixer.music.load(START_COMMENT_EN)
-                print("▶️ Playing English start comment")
-            else:
-                print("⚠️ Audio soubory nenalezeny v 'sounds/' složce")
-            pygame.mixer.music.play()
-        except Exception as e:
-            print(f"❌ Chyba při přehrávání audia: {e}")
+        paths = [START_COMMENT_CS, START_COMMENT_EN] if CURRENT_LANGUAGE == "CS" else [START_COMMENT_EN, START_COMMENT_CS]
+        play_first_existing_sound(paths, "start komentář")
+
+    def _play_win_sound(self):
+        paths = ([WIN_SOUND_CS, WIN_SOUND_ANY, WIN_SOUND_EN] if CURRENT_LANGUAGE == "CS"
+                 else [WIN_SOUND_EN, WIN_SOUND_ANY, WIN_SOUND_CS])
+        play_first_existing_sound(paths, "výhra týmu")
 
     def deploy_safety_car(self, min_duration, max_duration):
-        """Nasadí Safety Car na pozici aktuálního lídra, aby na něj mohlo pole postupně navázat."""
+        """Vyhlásí Safety Car. SC čeká v boxové uličce (u výjezdu) a vyjede na trať před lídra,
+        jakmile se k výjezdu blíží (viz _update_safety_car). Do té doby jede celé pole stejným,
+        sníženým tempem."""
         path_len = len(self.current_track["racing_line"]) if self.current_track else 1
+        geometry = get_pit_geometry(self.current_track)
         active = [d for d in self.drivers if not d.finished and not d.is_dnf]
-        leader = max(
-            active,
-            key=lambda d: d.current_lap * path_len + d.track_index + d.progress,
-            default=None,
-        )
+        leader_pos = max((d.current_lap * path_len + d.track_index + d.progress for d in active), default=0.0)
+
+        # Nejbližší výjezd z uličky před lídrem (SC musí vyjet PŘED něj, ne za něj)
+        exit_pos = (leader_pos // path_len) * path_len + (geometry["entry"] + geometry["length"]) % path_len
+        park_pos = exit_pos - SAFETY_CAR_EXIT_RUN
+        while park_pos < leader_pos + SAFETY_CAR_LEADER_GAP:
+            park_pos += path_len
+
+        laps, rest = divmod(park_pos, path_len)
+        self.safety_car_laps = int(laps)
+        self.safety_car_index = int(rest)
+        self.safety_car_progress = rest - int(rest)
 
         self.safety_car_active = True
+        self.safety_car_phase = "WAITING"
+        self.safety_car_in_lane = True
         self.safety_car_timer = random.uniform(min_duration, max_duration)
         self.safety_car_lined_up = False
-
-        if leader:
-            self.safety_car_laps = leader.current_lap
-            self.safety_car_index = leader.track_index
-            self.safety_car_progress = leader.progress
-        else:
-            self.safety_car_laps = 0
-            self.safety_car_index = 0
-            self.safety_car_progress = 0.0
-
         self._sc_speed_overrides = {}
+
+    def _lapped_cars(self):
+        """Jezdci, kteří jsou o celé kolo (a víc) za lídrem - ti se pod SC musí odlapnout."""
+        path_len = len(self.current_track["racing_line"])
+        active = [d for d in self.drivers if not d.finished and not d.is_dnf]
+        positions = {id(d): d.current_lap * path_len + d.track_index + d.progress for d in active}
+        if not positions:
+            return []
+        leader_pos = max(positions.values())
+        return [d for d in active if leader_pos - positions[id(d)] >= path_len]
+
+    def _update_safety_car(self, delta_time, path_len):
+        """Celý životní cyklus SC:
+        WAITING  - SC stojí v boxové uličce u výjezdu, pole jede společným sníženým tempem;
+        LEADING  - SC vyjel na trať před lídra, pole se za ním seřadí a odlapují se lapovaná
+                   auta. Končí až po uplynutí času, seřazení pole A odlapnutí všech aut;
+        ENDING   - SC jede dál až k vjezdu do boxů (pole za ním);
+        PITTING  - SC zajel do uličky, pole je uvolněné (safety_car_active = False)."""
+        phase = self.safety_car_phase
+        if phase == "NONE":
+            self._sc_speed_overrides = {}
+            return
+
+        geometry = get_pit_geometry(self.current_track)
+        entry, length = geometry["entry"], geometry["length"]
+        compression = getattr(self, 'time_compression', 1.0)
+
+        if phase == "PITTING":
+            self.safety_car_lane_d += SAFETY_CAR_PACE * compression * delta_time
+            if self.safety_car_lane_d > length + 1.0:
+                self.safety_car_phase = "NONE"
+                self.safety_car_in_lane = False
+            return
+
+        active = [d for d in self.drivers if not d.finished and not d.is_dnf]
+        leader_pos = max((d.current_lap * path_len + d.track_index + d.progress for d in active), default=None)
+
+        if phase == "WAITING":
+            self._sc_speed_overrides = {}
+            self.safety_car_lined_up = False
+            sc_pos = self.safety_car_laps * path_len + self.safety_car_index + self.safety_car_progress
+            if leader_pos is None or sc_pos - leader_pos <= SAFETY_CAR_JOIN_DISTANCE:
+                self.safety_car_phase = "LEADING"
+                print("🚨 SAFETY CAR vyjíždí z boxů před lídra")
+            return
+
+        # LEADING / ENDING: SC jede svým tempem (stejné jako auta v koloně za ním)
+        self.safety_car_progress += SAFETY_CAR_PACE * compression * delta_time
+        while self.safety_car_progress >= 1.0:
+            self.safety_car_progress -= 1.0
+            self.safety_car_index = (self.safety_car_index + 1) % path_len
+            if self.safety_car_index == 0:
+                self.safety_car_laps += 1
+
+        sc_track_pos = self.safety_car_index + self.safety_car_progress
+        d_entry = (sc_track_pos - entry) % path_len          # vzdálenost SC za vjezdem do uličky
+        if self.safety_car_in_lane and d_entry > length:
+            self.safety_car_in_lane = False                  # projel výjezdem, jede po trati
+
+        self.update_safety_car_queue()
+
+        if phase == "LEADING":
+            self.safety_car_timer -= delta_time
+            if (self.safety_car_timer <= 0 and self.safety_car_lined_up
+                    and not self.safety_car_in_lane and not self._lapped_cars()):
+                self.safety_car_phase = "ENDING"
+                print("🏁 SAFETY CAR IN THIS LAP - zajíždí do boxů")
+        elif phase == "ENDING":
+            if self.safety_car_timer > 0:
+                self.safety_car_phase = "LEADING"            # nová nehoda SC prodloužila
+            elif d_entry < PIT_ENTRY_WINDOW:
+                # SC zatáčí do uličky -> pole je uvolněné, závod pokračuje
+                self.safety_car_phase = "PITTING"
+                self.safety_car_active = False
+                self.safety_car_lined_up = False
+                self.safety_car_in_lane = True
+                self.safety_car_lane_d = d_entry
+                self._sc_speed_overrides = {}
+                print("🏁 SAFETY CAR V BOXECH - Závod pokračuje!")
 
     def update_safety_car_queue(self):
         """Spočítá cílové pozice a rychlosti aut, aby se seřadily do vláčku za Safety Carem."""
@@ -1568,6 +2049,8 @@ class ChampionshipScreen(Screen):
         self.safety_car_lined_up = worst_gap <= SAFETY_CAR_LINEUP_TOLERANCE
 
     def get_safety_car_speed(self, driver):
+        if self.safety_car_phase == "WAITING":
+            return SAFETY_CAR_WAIT_SPEED          # SC ještě nevyjel - celé pole jede stejným tempem
         return getattr(self, '_sc_speed_overrides', {}).get(id(driver), SAFETY_CAR_PACE)
 
     def update_drs(self):
@@ -1584,8 +2067,8 @@ class ChampionshipScreen(Screen):
         for d in self.drivers:
             d.drs_active = False
 
-        if self.race_phase != RACE_PHASE_RACING:
-            return  # DRS je před startem (formační kolo, semafor) vypnuté
+        if self.race_phase != RACE_PHASE_RACING or self.safety_car_active:
+            return  # DRS je před startem (formační kolo, semafor) a pod Safety Carem vypnuté
         if not ordered or ordered[0].current_lap < DRS_FIRST_LAP:
             return  # a v prvních dvou kolech závodu (current_lap = kolo, které lídr právě jede)
 
@@ -1636,6 +2119,14 @@ class ChampionshipScreen(Screen):
         global CURRENT_FPS, IS_FULLSCREEN
 
         for event in events:
+            # Otevřený panel pit stopu přebírá celý vstup (myš i klávesy)
+            if self.pit_panel_open:
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    self._handle_pit_panel_click(get_mouse_pos())
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    self.pit_panel_open = False
+                continue
+
             if event.type == pygame.MOUSEBUTTONDOWN:
                 pos = get_mouse_pos()
 
@@ -1679,28 +2170,13 @@ class ChampionshipScreen(Screen):
                             self.leave_results()
                         return
 
+                    # BOX otevře panel pit stopu (gumy, BOX THIS LAP / STAY OUT)
                     if self.pit_button1 and self.pit_button1.collidepoint(pos):
-                        self.show_tire_select = True
-                        self.tire_select_for = "driver1"
-                        self.tire_select_buttons = []
+                        self._open_pit_panel(0)
                         return
                     if self.pit_button2 and self.pit_button2.collidepoint(pos):
-                        self.show_tire_select = True
-                        self.tire_select_for = "driver2"
-                        self.tire_select_buttons = []
+                        self._open_pit_panel(1)
                         return
-
-                    # Výběr pneumatik
-                    if self.show_tire_select and self.tire_select_buttons:
-                        for rect, tire_type in self.tire_select_buttons:
-                            if rect.collidepoint(pos):
-                                chosen = self.player_team.drivers[0 if self.tire_select_for == "driver1" else 1]
-                                if not chosen.in_pit and not chosen.is_dnf and not chosen.finished:
-                                    chosen.next_tire = tire_type
-                                    chosen.pit_requested = True
-                                self.show_tire_select = False
-                                self.tire_select_buttons = []
-                                return
 
                     if self.pause_button and self.pause_button.collidepoint(pos):
                         self.paused = not self.paused   # pouze pause / unpause
@@ -2058,6 +2534,15 @@ class ChampionshipScreen(Screen):
             # Vlajky
             if self.safety_car_active:
                 screen.blit(self.font.render(get_text("FLAG_SC"), True, (255, 80, 0)), (1110, 30))
+                if self.safety_car_phase == "WAITING":
+                    sc_note = get_text("SC_WAITING")
+                elif self.safety_car_phase == "ENDING":
+                    sc_note = get_text("SC_ENDING")
+                else:
+                    lapped = len(self._lapped_cars())
+                    sc_note = f"{get_text('SC_UNLAPPING')} {lapped}" if lapped else ""
+                if sc_note:
+                    screen.blit(self.font_small.render(sc_note, True, (255, 170, 90)), (1110, 58))
             elif self.vsc_active:
                 screen.blit(self.font.render(get_text("FLAG_VSC"), True, (255, 200, 0)), (1110, 30))
             elif self.yellow_flag_active:
@@ -2184,14 +2669,23 @@ class ChampionshipScreen(Screen):
                     pygame.draw.circle(screen, (255,255,255), (int(x), int(y)), size + 3)
                     pygame.draw.circle(screen, color, (int(x), int(y)), size)
 
-                # === SAFETY CAR VIZUÁLNĚ ===
-                if self.safety_car_active:
-                    i = self.safety_car_index
-                    next_i = (i + 1) % len(path)
-                    x1, y1 = path[i]
-                    x2, y2 = path[next_i]
-                    x = x1 * scale_x + (x2 - x1) * self.safety_car_progress * scale_x + map_x
-                    y = y1 * scale_y + (y2 - y1) * self.safety_car_progress * scale_y + map_y
+                # === SAFETY CAR VIZUÁLNĚ (vyjíždí z boxové uličky a na konci do ní zajíždí) ===
+                if self.safety_car_phase != "NONE":
+                    if self.safety_car_phase == "PITTING":
+                        px, py = pit_lane_position(self.current_track, pit_geom,
+                                                   pit_geom["entry"] + self.safety_car_lane_d)
+                    elif self.safety_car_in_lane:
+                        px, py = pit_lane_position(self.current_track, pit_geom,
+                                                   self.safety_car_index + self.safety_car_progress)
+                    else:
+                        i = self.safety_car_index
+                        next_i = (i + 1) % len(path)
+                        x1, y1 = path[i]
+                        x2, y2 = path[next_i]
+                        px = x1 + (x2 - x1) * self.safety_car_progress
+                        py = y1 + (y2 - y1) * self.safety_car_progress
+                    x = px * scale_x + map_x
+                    y = py * scale_y + map_y
 
                     # Velký žlutý kruh s černým okrajem
                     pygame.draw.circle(screen, (255, 215, 0), (int(x), int(y)), 14)      # žlutá
@@ -2205,6 +2699,9 @@ class ChampionshipScreen(Screen):
             # Startovní semafor (přes mapu)
             if self.race_phase == RACE_PHASE_START or self.start_lights_out_timer > 0:
                 self._draw_start_lights(screen)
+
+            # Rádio boxové zdi (po BOX THIS LAP)
+            self._draw_radio(screen)
 
                         # === BOXY PRO JEZDCE 1 A 2 ===
             box_y = 650
@@ -2302,33 +2799,9 @@ class ChampionshipScreen(Screen):
                 screen.blit(txt, (right_x - 240, y))
                 y += 26
 
-            # === VÝBĚR PNEUMATIK (zeleně označená vybraná guma) ===
-            if self.show_tire_select:
-                overlay = pygame.Rect(520, 280, 480, 420)
-                pygame.draw.rect(screen, (20,20,35), overlay)
-                pygame.draw.rect(screen, (255,215,0), overlay, 6)
-                screen.blit(self.font_big.render("VYBER PNEUMATIKY", True, (255,215,0)), (600, 310))
-
-                tires = ["SOFT", "MEDIUM", "HARD", "INTER", "WET"]
-                tire_colors = {"SOFT":(255,60,60), "MEDIUM":(255,180,0), "HARD":(220,220,220),
-                               "INTER":(0,180,255), "WET":(30,80,255)}
-
-                self.tire_select_buttons = []
-                selected_tire = None
-                if self.tire_select_for == "driver1":
-                    selected_tire = self.player_team.drivers[0].next_tire
-                elif self.tire_select_for == "driver2":
-                    selected_tire = self.player_team.drivers[1].next_tire
-
-                for i, tire in enumerate(tires):
-                    btn = pygame.Rect(570, 380 + i*58, 380, 50)
-                    color = tire_colors[tire]
-                    border_color = (0, 255, 0) if tire == selected_tire else (255,255,255)
-                    pygame.draw.rect(screen, color, btn)
-                    pygame.draw.rect(screen, border_color, btn, 4)   # zelený rám pro vybranou
-                    txt = self.font.render(tire, True, (0,0,0))
-                    screen.blit(txt, txt.get_rect(center=btn.center))
-                    self.tire_select_buttons.append((btn, tire))
+            # Panel pit stopu (BOX) - přes celou obrazovku, závod je při něm pozastavený
+            if self.pit_panel_open:
+                self._draw_pit_panel(screen)
 
             # Zobrazení zprávy (uložení / načtení / seznam)
             if self.save_message_timer > 0:
@@ -2387,6 +2860,8 @@ class SettingsScreen(Screen):
 
         self.fullscreen_rect = None
         self.test_mode_rect = None
+        self.strange_sound_rect = None
+        self.radio_intro_rect = None
         self.test_lap_buttons = []
         self.fps_buttons = []
         self.race_mode_buttons = []
@@ -2407,7 +2882,7 @@ class SettingsScreen(Screen):
         self.race_screen = None  # rozjetý ChampionshipScreen, ke kterému se ESC vrátí
 
     def handle_events(self, events):
-        global CURRENT_FPS, IS_FULLSCREEN, CURRENT_RACE_MODE, CURRENT_LANGUAGE, TEST_MODE, TEST_MODE_LAPS
+        global CURRENT_FPS, IS_FULLSCREEN, CURRENT_RACE_MODE, CURRENT_LANGUAGE, TEST_MODE, TEST_MODE_LAPS, STRANGE_SOUND_ENABLED, RADIO_INTRO_MODE
 
         for event in events:
             if event.type == pygame.KEYDOWN:
@@ -2422,6 +2897,13 @@ class SettingsScreen(Screen):
 
                 if self.fullscreen_rect and self.fullscreen_rect.collidepoint(pos):
                     toggle_fullscreen()
+
+                if self.strange_sound_rect and self.strange_sound_rect.collidepoint(pos):
+                    STRANGE_SOUND_ENABLED = not STRANGE_SOUND_ENABLED
+
+                if self.radio_intro_rect and self.radio_intro_rect.collidepoint(pos):
+                    modes = RADIO_INTRO_MODES
+                    RADIO_INTRO_MODE = modes[(modes.index(RADIO_INTRO_MODE) + 1) % len(modes)]
 
                 if self.test_mode_rect and self.test_mode_rect.collidepoint(pos):
                     TEST_MODE = not TEST_MODE
@@ -2513,6 +2995,23 @@ class SettingsScreen(Screen):
         state_text = get_text("ON" if IS_FULLSCREEN else "OFF")
         txt = self.font.render(f"{get_text('FULLSCREEN')}: {state_text}  (F11)", True, (255, 255, 255))
         screen.blit(txt, txt.get_rect(center=self.fullscreen_rect.center))
+
+        # Strange sound (vlastní zvuk výhry, viz STRANGE_SOUND)
+        screen.blit(self.font.render(get_text("STRANGE SOUND"), True, (200, 200, 220)), (1220, 620))
+        self.strange_sound_rect = pygame.Rect(1220, 670, 280, 60)
+        pygame.draw.rect(screen, (255, 215, 0) if STRANGE_SOUND_ENABLED else (40, 40, 60), self.strange_sound_rect)
+        pygame.draw.rect(screen, (255, 255, 255), self.strange_sound_rect, 4 if STRANGE_SOUND_ENABLED else 2)
+        txt = self.font.render(get_text("ON" if STRANGE_SOUND_ENABLED else "OFF"), True, (255, 255, 255))
+        screen.blit(txt, txt.get_rect(center=self.strange_sound_rect.center))
+
+        # Úvod rádia boxové zdi (co zazní před "Box, box" - cyklí se po kliknutí)
+        screen.blit(self.font.render(get_text("RADIO INTRO"), True, (200, 200, 220)), (1220, 770))
+        self.radio_intro_rect = pygame.Rect(1220, 820, 280, 60)
+        radio_on = RADIO_INTRO_MODE != "OFF"
+        pygame.draw.rect(screen, (255, 215, 0) if radio_on else (40, 40, 60), self.radio_intro_rect)
+        pygame.draw.rect(screen, (255, 255, 255), self.radio_intro_rect, 4 if radio_on else 2)
+        txt = self.font.render(get_text("RADIO_" + RADIO_INTRO_MODE), True, (255, 255, 255))
+        screen.blit(txt, txt.get_rect(center=self.radio_intro_rect.center))
 
         # Testovací režim (dočasný)
         screen.blit(self.font.render(f"{get_text('TEST MODE')}  -  {get_text('TEST MODE LAPS')}", True, (255, 160, 60)), (580, 770))
