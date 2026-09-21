@@ -243,6 +243,24 @@ se přeskočilo o 8 bodů dopředu (zisk pozice, ne ztráta). Teď:
   emoji (v herním fontu se kreslily jako čtverečky) a už nepřekrývají "Championship
   standings".
 
+## Testovací režim (dočasný, v Nastavení)
+Slouží k ručnímu zkoušení nových věcí bez odjetí celého závodu. V Nastavení tlačítko
+ZAP/VYP a volba počtu kol (`TEST_MODE_LAP_OPTIONS` = 3 / 5 / 10, výchozí `TEST_MODE_LAPS` = 5;
+kliknutí na počet kol režim rovnou zapne).
+- Globály `TEST_MODE` / `TEST_MODE_LAPS` (u `CURRENT_RACE_MODE`); platí od DALŠÍHO načtení
+  závodu (`_load_race()`), ne pro už rozjetý. Nastavení se neukládá na disk.
+- `_load_race()` bere počet kol z `ORIGINAL_TRACK_LAPS` (kopie z `tracks_data` pořízená při
+  importu), NE z `current_track["laps"]` - to se přepisuje a jinak by po vypnutí režimu
+  zůstala trať trvale zkrácená.
+- Během závodu svítí v hlavičce oranžový štítek "TESTOVACÍ REŽIM" u čísla kola.
+- Tip: formační kolo trvá ~2 min i v testu (je časované reálně); pro rychlé zkoušení použít
+  rychlost 20x.
+- **Až nebude potřeba, smazat:** blok `TEST_MODE*` u `CURRENT_RACE_MODE`, `ORIGINAL_TRACK_LAPS`
+  + jeho použití v `_load_race()`, tlačítka v `SettingsScreen` (`test_mode_rect`,
+  `test_lap_buttons`), štítek v hlavičce a klíče `TEST MODE*`/`ON`/`OFF` v `TEXTS`.
+- Vedlejší oprava: tlačítko Celá obrazovka v Nastavení dřív neexistovalo (`fullscreen_rect`
+  zůstávalo `None`, přepínalo jen F11) - teď se kreslí ("ZOBRAZENÍ").
+
 ## Výsledkové okno po závodě
 Po skončení závodu (`race_finished`) `draw()` místo běžného závodního UI kreslí
 `_draw_results_screen()` (celá obrazovka) - nahradilo malé okénko "ZÁVOD SKONČIL", podium v

@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime
 from tracks_data import tracks
+ORIGINAL_TRACK_LAPS = {t["name"]: t["laps"] for t in tracks}
 from championship_data import TEAMS, DRIVER_BASE_TIMES, CALENDAR_2025
 
 # Adresář, kde leží manager.py - všechny relativní cesty (mapy, zvuky, uložené hry)
@@ -47,6 +48,16 @@ IS_FULLSCREEN = False
 
 # Globální nastavení závodu a jazyka
 CURRENT_RACE_MODE = "SHORT"
+
+# === TESTOVACÍ REŽIM (dočasný, v Nastavení) ===
+# Zkrátí každý závod na TEST_MODE_LAPS kol, aby se nové věci (formační kolo, semafor, pit
+# stopy, počasí, výsledkové okno...) daly zkoušet bez odjetí celého závodu. Platí od dalšího
+# načtení závodu. Původní počty kol tratí se drží stranou v ORIGINAL_TRACK_LAPS, takže po
+# vypnutí se vrátí plná délka. Až nebude potřeba, stačí smazat tenhle blok, tlačítka v
+# SettingsScreen, štítek "TEST MODE" v hlavičce závodu a použití v _load_race().
+TEST_MODE = False
+TEST_MODE_LAP_OPTIONS = [3, 5, 10]
+TEST_MODE_LAPS = 5
 CURRENT_LANGUAGE = "CS"   # CZ → CS (opraveno)
 
 # Race phases
@@ -105,6 +116,13 @@ TEXTS = {
     "Crash": {"CS": "Nehoda", "EN": "Crash", "IT": "Incidente"},
     "Big Shunt": {"CS": "Těžká nehoda", "EN": "Big Shunt", "IT": "Grosso incidente"},
     "Spin + Wall": {"CS": "Smyk + zeď", "EN": "Spin + Wall", "IT": "Testacoda + muro"},
+    "DISPLAY": {"CS": "ZOBRAZENÍ", "EN": "DISPLAY", "IT": "SCHERMO"},
+    "FULLSCREEN": {"CS": "CELÁ OBRAZOVKA", "EN": "FULLSCREEN", "IT": "SCHERMO INTERO"},
+    "ON": {"CS": "ZAP", "EN": "ON", "IT": "ON"},
+    "OFF": {"CS": "VYP", "EN": "OFF", "IT": "OFF"},
+    "TEST MODE": {"CS": "TESTOVACÍ REŽIM", "EN": "TEST MODE", "IT": "MODALITÀ TEST"},
+    "TEST MODE LAPS": {"CS": "Počet kol", "EN": "Laps", "IT": "Giri"},
+    "TEST MODE HINT": {"CS": "Zkrátí závody - platí od dalšího načtení závodu", "EN": "Shortens races - applies from the next race load", "IT": "Accorcia le gare - vale dal prossimo caricamento"},
     "START LIGHTS": {"CS": "STARTOVNÍ SEMAFOR", "EN": "START LIGHTS", "IT": "SEMAFORI DI PARTENZA"},
     "LIGHTS OUT...": {"CS": "SVĚTLA ZHASLA...", "EN": "LIGHTS OUT...", "IT": "LE LUCI SI SONO SPENTE..."},
     "VYBERTE SVŮJ TÝM": {"CS": "VYBERTE SVŮJ TÝM", "EN": "CHOOSE YOUR TEAM", "IT": "SCEGLI LA TUA SQUADRA"},
@@ -942,7 +960,9 @@ class ChampionshipScreen(Screen):
             return
 
         # === NASTAVENÍ DÉLKY A RYCHLOSTI ZÁVODU ===
-        original_laps = self.current_track.get("laps", 58)
+        original_laps = ORIGINAL_TRACK_LAPS.get(self.current_track["name"], self.current_track.get("laps", 58))
+        if TEST_MODE:
+            original_laps = min(original_laps, TEST_MODE_LAPS)   # testovací režim: krátký závod
         self.current_track["laps"] = original_laps   # oba módy mají plný počet kol
 
         if CURRENT_RACE_MODE == "FULL":
@@ -2007,6 +2027,8 @@ class ChampionshipScreen(Screen):
             track_name = self.current_track["name"] if self.current_track else "?"
 
             screen.blit(self.font_big.render(f"{get_text('Kolo')} {current_lap}/{self.current_track['laps']}", True, (255, 215, 0)), (40, 25))
+            if TEST_MODE:
+                screen.blit(self.font.render(get_text("TEST MODE"), True, (255, 140, 0)), (260, 32))
             screen.blit(self.font.render(f"{get_text('Čas:')} {self.race_time:.1f}s", True, (255, 255, 255)), (40, 68))
             weather_text = (f"{get_text('Počasí:')} {get_text('WEATHER_' + self.current_weather)}   "
                             f"{get_text('Vlhkost trati:')} {int(self.track_wetness * 100)}%")
@@ -2364,6 +2386,8 @@ class SettingsScreen(Screen):
         self.current_fps_index = self.fps_options.index(CURRENT_FPS) if CURRENT_FPS in self.fps_options else 1
 
         self.fullscreen_rect = None
+        self.test_mode_rect = None
+        self.test_lap_buttons = []
         self.fps_buttons = []
         self.race_mode_buttons = []
         self.language_buttons = []
@@ -2383,7 +2407,7 @@ class SettingsScreen(Screen):
         self.race_screen = None  # rozjetý ChampionshipScreen, ke kterému se ESC vrátí
 
     def handle_events(self, events):
-        global CURRENT_FPS, IS_FULLSCREEN, CURRENT_RACE_MODE, CURRENT_LANGUAGE
+        global CURRENT_FPS, IS_FULLSCREEN, CURRENT_RACE_MODE, CURRENT_LANGUAGE, TEST_MODE, TEST_MODE_LAPS
 
         for event in events:
             if event.type == pygame.KEYDOWN:
@@ -2398,6 +2422,13 @@ class SettingsScreen(Screen):
 
                 if self.fullscreen_rect and self.fullscreen_rect.collidepoint(pos):
                     toggle_fullscreen()
+
+                if self.test_mode_rect and self.test_mode_rect.collidepoint(pos):
+                    TEST_MODE = not TEST_MODE
+                for lap_count, rect in zip(TEST_MODE_LAP_OPTIONS, self.test_lap_buttons):
+                    if rect.collidepoint(pos):
+                        TEST_MODE_LAPS = lap_count
+                        TEST_MODE = True
 
                 for i, btn in enumerate(self.fps_buttons):
                     if btn.collidepoint(pos):
@@ -2474,8 +2505,35 @@ class SettingsScreen(Screen):
             txt = self.font.render(lang, True, (255,255,255))
             screen.blit(txt, txt.get_rect(center=rect.center))
 
+        # Zobrazení (celá obrazovka; přepíná i F11)
+        screen.blit(self.font.render(get_text("DISPLAY"), True, (200, 200, 220)), (580, 620))
+        self.fullscreen_rect = pygame.Rect(580, 670, 600, 60)
+        pygame.draw.rect(screen, (255, 215, 0) if IS_FULLSCREEN else (40, 40, 60), self.fullscreen_rect)
+        pygame.draw.rect(screen, (255, 255, 255), self.fullscreen_rect, 4 if IS_FULLSCREEN else 2)
+        state_text = get_text("ON" if IS_FULLSCREEN else "OFF")
+        txt = self.font.render(f"{get_text('FULLSCREEN')}: {state_text}  (F11)", True, (255, 255, 255))
+        screen.blit(txt, txt.get_rect(center=self.fullscreen_rect.center))
+
+        # Testovací režim (dočasný)
+        screen.blit(self.font.render(f"{get_text('TEST MODE')}  -  {get_text('TEST MODE LAPS')}", True, (255, 160, 60)), (580, 770))
+        self.test_mode_rect = pygame.Rect(580, 820, 280, 60)
+        pygame.draw.rect(screen, (255, 140, 0) if TEST_MODE else (40, 40, 60), self.test_mode_rect)
+        pygame.draw.rect(screen, (255, 255, 255), self.test_mode_rect, 4 if TEST_MODE else 2)
+        txt = self.font.render(get_text('ON' if TEST_MODE else 'OFF'), True, (255, 255, 255))
+        screen.blit(txt, txt.get_rect(center=self.test_mode_rect.center))
+        self.test_lap_buttons = []
+        for i, lap_count in enumerate(TEST_MODE_LAP_OPTIONS):
+            rect = pygame.Rect(890 + i * 110, 820, 95, 60)
+            self.test_lap_buttons.append(rect)
+            selected = TEST_MODE and lap_count == TEST_MODE_LAPS
+            pygame.draw.rect(screen, (255, 140, 0) if selected else (40, 40, 60), rect)
+            pygame.draw.rect(screen, (255, 255, 255), rect, 4 if selected else 2)
+            txt = self.font.render(str(lap_count), True, (255, 255, 255))
+            screen.blit(txt, txt.get_rect(center=rect.center))
+        screen.blit(self.font_small.render(get_text("TEST MODE HINT"), True, (160, 160, 180)), (580, 895))
+
         back = self.font_small.render("ESC = zpět", True, (160, 160, 180))
-        screen.blit(back, (780, 720))
+        screen.blit(back, (780, 980))
 
 def change_screen(new_state):
     global current_screen, game_state
