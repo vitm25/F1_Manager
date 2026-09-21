@@ -243,6 +243,27 @@ se přeskočilo o 8 bodů dopředu (zisk pozice, ne ztráta). Teď:
   emoji (v herním fontu se kreslily jako čtverečky) a už nepřekrývají "Championship
   standings".
 
+## Výsledkové okno po závodě
+Po skončení závodu (`race_finished`) `draw()` místo běžného závodního UI kreslí
+`_draw_results_screen()` (celá obrazovka) - nahradilo malé okénko "ZÁVOD SKONČIL", podium v
+záhlaví a finální leaderboard vlevo (to všechno je smazané).
+- Vpravo nahoře tlačítko "DALŠÍ ZÁVOD" (`NEXT RACE`), Enter dělá totéž (`leave_results()`).
+  Po POSLEDNÍM závodě sezóny je místo něj "NÁVRAT DO MENU" a v podtitulku "KONEC SEZÓNY".
+  Okno polkne veškeré kliky (pit tlačítka pod ním nesmí reagovat) - viz `handle_events`.
+- Tři okna vedle sebe (`_draw_results_panel`): **Race finish** (pořadí v cíli: čas vítěze,
+  odstup `+X.Xs` nebo `+N kol` od 88 s, body `+25`, DNF s důvodem), **Driver standings**
+  a **Team standings** (body celkem, `+body` za tento závod, změna pozice). Řádky týmu
+  hráče jsou zvýrazněné. Data skládá `_results_data()`.
+- **Změna pozice** (`moves()`): rank = kolik položek má aspoň tolik bodů (shoda = nejhůř);
+  kdo před závodem nemá body, do pořadí ještě nepatřil a změna se u něj neukazuje (jinak by
+  se po 1. závodě objevovaly nesmyslné "-10"). Zelené +N / červené -N / šedé =.
+- Všechny texty přes `get_text()` (CS/EN/IT): `RACE FINISH`, `DRIVER STANDINGS`, `TEAM
+  STANDINGS`, `NEXT RACE`, `RACE FINISHED`, `SEASON OVER`, `ROUND`, `PTS`, `LAP`/`LAPS` a
+  důvody DNF (`Engine`, `Crash`, ...). Stejné klíče se použily i pro pravý panel během
+  závodu (dřív natvrdo anglicky) a živý leaderboard ("kolo/kol" -> `LAP`/`LAPS`).
+- Opravená chyba: `driver.race_points` zůstávalo ze starého závodu (přiřazovalo se jen
+  jezdcům v bodech). Teď se nuluje v `finish_race()` i `_load_race()`.
+
 ## Pit stopy / stinty pneumatik – opraveno (počítání i wear rate)
 Dřív `ai_should_pit()` počítalo `driver.current_stint_laps += 1` při KAŽDÉM AI
 rozhodovacím tiku (~každých 0.9 s), ne jednou za skutečně dojeté kolo, a navíc to
@@ -349,8 +370,7 @@ auto-save po závodě, in-game menu (ESC), Settings (FPS, Race Length, Language)
 
 ## TODO priority
 **Vysoká:** žádná otevřená (viz opravy výše).
-**Střední:** doplnit chybějící překlady hardcoded textů (např. "kolo/kol" v leaderboardu,
-"ULOŽENÉ HRY"); pit stopy: double-stack (oba jezdci týmu se dvěma auty v boxu naráz
+**Střední:** doplnit chybějící překlady hardcoded textů (např. "ULOŽENÉ HRY", "VYBER PNEUMATIKY"); pit stopy: double-stack (oba jezdci týmu se dvěma auty v boxu naráz
 nečekají na sebe), v uličce se nekontroluje kolize aut; počasí: bez předpovědi.
 **Střední (k ověření s uživatelem):** `load_game()` obnoví jezdce (kola, pozice, gumy...) a hned
 potom zavolá `_load_race()`, které je celé resetuje - reálně se tedy načte jen šampionát

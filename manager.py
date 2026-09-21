@@ -91,6 +91,20 @@ TEXTS = {
     "FLAG_SC": {"CS": "SAFETY CAR", "EN": "SAFETY CAR", "IT": "SAFETY CAR"},
     "FLAG_VSC": {"CS": "VIRTUÁLNÍ SC", "EN": "VIRTUAL SC", "IT": "SC VIRTUALE"},
     "FLAG_YELLOW": {"CS": "ŽLUTÁ VLAJKA", "EN": "YELLOW FLAG", "IT": "BANDIERA GIALLA"},
+    "RACE FINISH": {"CS": "VÝSLEDKY ZÁVODU", "EN": "RACE FINISH", "IT": "ARRIVO DELLA GARA"},
+    "DRIVER STANDINGS": {"CS": "POŘADÍ JEZDCŮ", "EN": "DRIVER STANDINGS", "IT": "CLASSIFICA PILOTI"},
+    "TEAM STANDINGS": {"CS": "POŘADÍ TÝMŮ", "EN": "TEAM STANDINGS", "IT": "CLASSIFICA COSTRUTTORI"},
+    "NEXT RACE": {"CS": "DALŠÍ ZÁVOD", "EN": "NEXT RACE", "IT": "PROSSIMA GARA"},
+    "RACE FINISHED": {"CS": "ZÁVOD SKONČIL", "EN": "RACE FINISHED", "IT": "GARA TERMINATA"},
+    "SEASON OVER": {"CS": "KONEC SEZÓNY", "EN": "SEASON OVER", "IT": "FINE STAGIONE"},
+    "ROUND": {"CS": "Závod", "EN": "Round", "IT": "Gara"},
+    "PTS": {"CS": "b.", "EN": "pts", "IT": "pt"},
+    "LAP": {"CS": "kolo", "EN": "lap", "IT": "giro"},
+    "LAPS": {"CS": "kol", "EN": "laps", "IT": "giri"},
+    "Engine": {"CS": "Motor", "EN": "Engine", "IT": "Motore"},
+    "Crash": {"CS": "Nehoda", "EN": "Crash", "IT": "Incidente"},
+    "Big Shunt": {"CS": "Těžká nehoda", "EN": "Big Shunt", "IT": "Grosso incidente"},
+    "Spin + Wall": {"CS": "Smyk + zeď", "EN": "Spin + Wall", "IT": "Testacoda + muro"},
     "START LIGHTS": {"CS": "STARTOVNÍ SEMAFOR", "EN": "START LIGHTS", "IT": "SEMAFORI DI PARTENZA"},
     "LIGHTS OUT...": {"CS": "SVĚTLA ZHASLA...", "EN": "LIGHTS OUT...", "IT": "LE LUCI SI SONO SPENTE..."},
     "VYBERTE SVŮJ TÝM": {"CS": "VYBERTE SVŮJ TÝM", "EN": "CHOOSE YOUR TEAM", "IT": "SCEGLI LA TUA SQUADRA"},
@@ -104,6 +118,15 @@ TEXTS = {
     "JAZYK": {"CS": "JAZYK", "EN": "LANGUAGE", "IT": "LINGUA"},
     "FRAMERATE (FPS)": {"CS": "FRAMERATE (FPS)", "EN": "FRAMERATE (FPS)", "IT": "FREQUENZA DEI FRAME"},
 }
+
+def format_race_time(seconds):
+    """Čas závodu jako h:mm:ss.s nebo m:ss.s (stejné jednotky jako "Čas:" v hlavičce závodu)."""
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours >= 1:
+        return f"{int(hours)}:{int(minutes):02d}:{secs:04.1f}"
+    return f"{int(minutes)}:{secs:04.1f}"
+
 
 def get_text(key, lang=None):
     if lang is None:
@@ -847,6 +870,7 @@ class ChampionshipScreen(Screen):
         self.speed_buttons = []
         self.pause_button = None
         self.pit_button1 = None
+        self.next_race_button = None
         self.pit_button2 = None
         self.start_season_button = None
 
@@ -944,6 +968,7 @@ class ChampionshipScreen(Screen):
             driver.progress = 0.0
             driver.current_lap = 0
             driver.finished = False
+            driver.race_points = 0
             driver.pit_requested = False
             driver.in_pit = False
             driver.on_pit_lane = False
@@ -1004,6 +1029,8 @@ class ChampionshipScreen(Screen):
         finished_drivers = [d for d in self.drivers if d.finished and not d.is_dnf]
         finished_drivers.sort(key=lambda d: d.total_time if d.total_time > 0 else 999999)
         
+        for driver in self.drivers:
+            driver.race_points = 0
         for i, driver in enumerate(finished_drivers):
             if i < len(POINTS):
                 pts = POINTS[i]
@@ -1016,6 +1043,13 @@ class ChampionshipScreen(Screen):
         # === AUTOMATICKÉ ULOŽENÍ PO ZÁVODĚ ===
         self.save_game(slot=1)   # uloží do slotu 1
         print("💾 Automatické uložení po závodě provedeno.")
+
+    def leave_results(self):
+        """Tlačítko "Další závod" na výsledkovém okně (po posledním závodě návrat do menu)."""
+        if self.current_race_index + 1 >= len(CALENDAR_2025):
+            change_screen(GAME_STATE_MENU)
+        else:
+            self.next_race()
 
     def next_race(self):
         self.current_race_index += 1
@@ -1620,6 +1654,11 @@ class ChampionshipScreen(Screen):
                         return
 
                 elif self.state == "RACE":
+                    if self.race_finished:
+                        if self.next_race_button and self.next_race_button.collidepoint(pos):
+                            self.leave_results()
+                        return
+
                     if self.pit_button1 and self.pit_button1.collidepoint(pos):
                         self.show_tire_select = True
                         self.tire_select_for = "driver1"
@@ -1650,9 +1689,6 @@ class ChampionshipScreen(Screen):
                         if btn["rect"].collidepoint(pos):
                             self.time_scale = btn["speed"]
 
-                    if self.race_finished and hasattr(self, 'next_race_button') and self.next_race_button.collidepoint(pos):
-                        self.next_race()
-
                 elif self.state == "SAVE_LIST":
                     if event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_ESCAPE:
@@ -1671,6 +1707,11 @@ class ChampionshipScreen(Screen):
 
             # ==================== KLÁVESNICOVÉ OVLÁDÁNÍ ====================
             elif event.type == pygame.KEYDOWN:
+                if (self.race_finished and self.state == "RACE" and not self.show_ingame_menu
+                        and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)):
+                    self.leave_results()
+                    return
+
                 if event.key == pygame.K_ESCAPE:
                     if self.show_ingame_menu:
                         self.show_ingame_menu = False
@@ -1717,6 +1758,157 @@ class ChampionshipScreen(Screen):
         if driver.pit_requested:
             return (225, 165, 0)
         return (200, 60, 60)
+
+    def _results_data(self):
+        """Podklady pro výsledkové okno: pořadí v cíli, pořadí jezdců a týmů (se změnou po tomto závodě)."""
+        path_len = len(self.current_track["racing_line"])
+        finishers = sorted((d for d in self.drivers if d.finished and not d.is_dnf),
+                           key=lambda d: d.total_time if d.total_time > 0 else 999999)
+        retired = sorted((d for d in self.drivers if d.is_dnf),
+                         key=lambda d: d.current_lap * path_len + d.track_index + d.progress, reverse=True)
+
+        def moves(items, points_of, race_points_of):
+            """O kolik míst se položka posunula nahoru (+) / dolů (-) tímto závodem.
+
+            Pořadí se při shodě bodů bere "nejhůř" (rank = kolik položek má aspoň tolik
+            bodů). Kdo před závodem neměl žádné body, do pořadí ještě nepatřil - změna
+            se u něj neukazuje (None), jinak by se po prvním závodě zobrazovaly výmysly."""
+            result = {}
+            for item in items:
+                before = points_of(item) - race_points_of(item)
+                if before <= 0:
+                    result[id(item)] = None
+                    continue
+                rank_before = sum(1 for o in items if points_of(o) - race_points_of(o) >= before)
+                rank_after = sum(1 for o in items if points_of(o) >= points_of(item))
+                result[id(item)] = rank_before - rank_after
+            return result
+
+        teams = list(self.teams.values())
+        team_race_points = {t.name: sum(d.race_points for d in t.drivers) for t in teams}
+        return {
+            "finishers": finishers, "retired": retired,
+            "drivers": sorted(self.drivers, key=lambda d: -d.points),
+            "teams": sorted(teams, key=lambda t: -t.points),
+            "driver_move": moves(self.drivers, lambda d: d.points, lambda d: d.race_points),
+            "team_move": moves(teams, lambda t: t.points, lambda t: team_race_points[t.name]),
+            "team_race_points": team_race_points,
+        }
+
+    def _draw_results_panel(self, screen, rect, title, rows, row_height):
+        """Jedno okno výsledků: nadpis + řádky (pos, jméno, barva týmu, sloupce zprava)."""
+        pygame.draw.rect(screen, (20, 20, 34), rect, border_radius=10)
+        pygame.draw.rect(screen, (255, 215, 0), rect, 3, border_radius=10)
+        screen.blit(self.font_big.render(title, True, (255, 215, 0)), (rect.x + 22, rect.y + 14))
+        pygame.draw.line(screen, (90, 90, 110), (rect.x + 16, rect.y + 62), (rect.right - 16, rect.y + 62), 2)
+
+        y = rect.y + 72
+        for row in rows:
+            if row.get("highlight"):
+                pygame.draw.rect(screen, (40, 52, 84), (rect.x + 10, y - 3, rect.w - 20, row_height - 4), border_radius=6)
+            pygame.draw.rect(screen, row["color"], (rect.x + 64, y + 2, 6, row_height - 12))
+            text_y = y + (row_height - 4 - self.font.get_height()) // 2 - 1
+            pos_font = self.font_small if len(row["pos"]) > 3 else self.font   # "DNF" se jinak tlačí na barevný proužek týmu
+            screen.blit(pos_font.render(row["pos"], True, (200, 200, 215)),
+                        (rect.x + 20, y + (row_height - 4 - pos_font.get_height()) // 2 - 1))
+            screen.blit(self.font.render(row["name"], True, row["color"]), (rect.x + 82, text_y))
+            for text, color, right_offset in row["columns"]:
+                surf = self.font.render(text, True, color)
+                screen.blit(surf, (rect.right - right_offset - surf.get_width(), text_y))
+            y += row_height
+
+    @staticmethod
+    def _move_column(move):
+        """Změna pozice v pořadí po závodě: zelené +N (posun nahoru), červené -N, šedé =."""
+        if move is None:
+            return None
+        if move > 0:
+            return (f"+{move}", (90, 230, 120), 18)
+        if move < 0:
+            return (f"{move}", (240, 90, 90), 18)
+        return ("=", (150, 150, 165), 18)
+
+    def _draw_results_screen(self, screen):
+        """Okno po skončení závodu: Race finish / Driver standings / Team standings + tlačítko Další závod."""
+        screen.fill((12, 12, 22))
+        data = self._results_data()
+        track_name = self.current_track["name"].upper()
+        last_race = self.current_race_index + 1 >= len(CALENDAR_2025)
+
+        screen.blit(self.font_big.render(f"{get_text('RACE FINISHED')} - {track_name}", True, (255, 215, 0)), (40, 28))
+        subtitle = f"{get_text('ROUND')} {self.current_race_index + 1}/{len(CALENDAR_2025)}"
+        if last_race:
+            subtitle += f"  -  {get_text('SEASON OVER')}"
+        screen.blit(self.font.render(subtitle, True, (170, 170, 190)), (40, 70))
+
+        # Tlačítko vpravo nahoře
+        self.next_race_button = pygame.Rect(WIDTH - 40 - 400, 22, 400, 68)
+        hovered = self.next_race_button.collidepoint(get_mouse_pos())
+        pygame.draw.rect(screen, (110, 225, 130) if hovered else (80, 200, 100), self.next_race_button, border_radius=10)
+        pygame.draw.rect(screen, (255, 255, 255), self.next_race_button, 3, border_radius=10)
+        label = get_text("NÁVRAT DO MENU") if last_race else get_text("NEXT RACE")
+        label_surf = self.font_big.render(label, True, (255, 255, 255))
+        screen.blit(label_surf, label_surf.get_rect(center=self.next_race_button.center))
+
+        # Tři okna vedle sebe
+        gap = 30
+        panel_w = (WIDTH - 2 * 40 - 2 * gap) // 3
+        panel_y, panel_h = 118, HEIGHT - 118 - 30
+        panels = [pygame.Rect(40 + i * (panel_w + gap), panel_y, panel_w, panel_h) for i in range(3)]
+        team_color = lambda name: self.teams[name].color
+        mine = self.player_team.name if self.player_team else None
+        pts = get_text("PTS")
+
+        # 1) výsledky závodu
+        rows = []
+        winner_time = data["finishers"][0].total_time if data["finishers"] else 0.0
+        for i, driver in enumerate(data["finishers"]):
+            if i == 0:
+                gap_text = format_race_time(driver.total_time)
+            else:
+                gap_s = driver.total_time - winner_time
+                if gap_s >= 88:   # stejný odhad "88 s na kolo" jako živý leaderboard
+                    laps_down = int(gap_s // 88)
+                    gap_text = f"+{laps_down} {get_text('LAP' if laps_down == 1 else 'LAPS')}"
+                else:
+                    gap_text = f"+{gap_s:.1f}s"
+            columns = [(gap_text, (215, 215, 225), 96 if driver.race_points else 18)]
+            if driver.race_points:
+                columns.append((f"+{driver.race_points}", (255, 215, 0), 18))
+            rows.append({"pos": f"{i + 1}.", "name": driver.name, "color": team_color(driver.team_name),
+                         "columns": columns, "highlight": driver.team_name == mine})
+        for driver in data["retired"]:
+            reason = get_text(driver.dnf_reason) if driver.dnf_reason else ""
+            rows.append({"pos": "DNF", "name": driver.name, "color": (200, 90, 90),
+                         "columns": [(reason, (200, 90, 90), 18)], "highlight": driver.team_name == mine})
+        self._draw_results_panel(screen, panels[0], get_text("RACE FINISH"), rows, 40)
+
+        # 2) pořadí jezdců
+        rows = []
+        for i, driver in enumerate(data["drivers"]):
+            columns = [(f"{driver.points} {pts}", (235, 235, 245), 150)]
+            if driver.race_points:
+                columns.append((f"+{driver.race_points}", (255, 215, 0), 92))
+            move_column = self._move_column(data["driver_move"][id(driver)])
+            if move_column:
+                columns.append(move_column)
+            rows.append({"pos": f"{i + 1}.", "name": driver.name, "color": team_color(driver.team_name),
+                         "columns": columns, "highlight": driver.team_name == mine})
+        self._draw_results_panel(screen, panels[1], get_text("DRIVER STANDINGS"), rows, 40)
+
+        # 3) pořadí týmů
+        rows = []
+        for i, team in enumerate(data["teams"]):
+            race_pts = data["team_race_points"][team.name]
+            columns = [(f"{team.points} {pts}", (235, 235, 245), 150)]
+            if race_pts:
+                columns.append((f"+{race_pts}", (255, 215, 0), 92))
+            move_column = self._move_column(data["team_move"][id(team)])
+            if move_column:
+                columns.append(move_column)
+            rows.append({"pos": f"{i + 1}.", "name": team.name, "color": team.color,
+                         "columns": columns, "highlight": team.name == mine})
+        self._draw_results_panel(screen, panels[2], get_text("TEAM STANDINGS"), rows, 62)
 
     def _draw_start_lights(self, screen):
         """Pětice startovních světel jako na F1 semaforu (2 světla nad sebou v každém sloupci)."""
@@ -1806,6 +1998,10 @@ class ChampionshipScreen(Screen):
             screen.blit(txt, txt.get_rect(center=self.start_season_button.center))
 
         elif self.state == "RACE":
+            if self.race_finished:
+                self._draw_results_screen(screen)
+                return
+
             # Horní informace - F1 styl
             current_lap = min(max((d.current_lap for d in self.drivers), default=0), self.current_track["laps"])
             track_name = self.current_track["name"] if self.current_track else "?"
@@ -1837,29 +2033,6 @@ class ChampionshipScreen(Screen):
                 msg = self.font_big.render(self.save_message, True, color)
                 screen.blit(msg, (960 - msg.get_width()//2, 520))
 
-            # === PODIUM (zobrazí se po skončení závodu) ===
-                        # === PODIUM (pouze jezdci, kteří dokončili závod) ===
-            if self.race_finished:
-                finished = [d for d in self.drivers if d.finished and not d.is_dnf]
-                finished.sort(key=lambda d: d.total_time if d.total_time > 0 else 999999)
-
-                podium_y = 78
-
-                #1. místo
-                if len(finished) > 0:
-                    d1 = finished[0]
-                    screen.blit(self.font_big.render(f"1. {d1.name}", True, (255, 215, 0)), (780, podium_y))   # zlato
-
-                #2. místo
-                if len(finished) > 1:
-                    d2 = finished[1]
-                    screen.blit(self.font.render(f"2. {d2.name}", True, (192, 192, 192)), (820, podium_y + 42))  # stříbro
-
-                #3. místo
-                if len(finished) > 2:
-                    d3 = finished[2]
-                    screen.blit(self.font.render(f"3. {d3.name}", True, (205, 127, 50)), (820, podium_y + 72))   # bronz
-
             # Vlajky
             if self.safety_car_active:
                 screen.blit(self.font.render(get_text("FLAG_SC"), True, (255, 80, 0)), (1110, 30))
@@ -1872,79 +2045,48 @@ class ChampionshipScreen(Screen):
             y = 170
             self.driver_rects = []
 
-            if self.race_finished:
-                # === FINÁLNÍ VÝSLEDKY PO SKONČENÍ ZÁVODU ===
-                finished = [d for d in self.drivers if d.finished and not d.is_dnf]
-                finished.sort(key=lambda d: d.total_time if d.total_time > 0 else 999999)
+            # === BĚŽNÝ LEADERBOARD BĚHEM ZÁVODU ===
+            # Stejný poziční vzorec jako jinde v kódu (handle_battles, Safety Car) -
+            # dřív tu byly natvrdo konstanty *10000/*100, které by se rozbily na
+            # trati s racing_line delší než 100 bodů (track_index by "přetekl" do
+            # číslice kola).
+            leaderboard_path_len = len(self.current_track["racing_line"])
+            ordered = sorted(self.drivers,
+                           key=lambda d: d.current_lap * leaderboard_path_len + d.track_index + d.progress,
+                           reverse=True)
+            
+            leader_total_pos = (ordered[0].current_lap * leaderboard_path_len
+                                + ordered[0].track_index + ordered[0].progress) if ordered else 0
 
-                # DNF jezdci na konec
-                dnfs = [d for d in self.drivers if d.is_dnf]
-                all_results = finished + dnfs
+            for i, driver in enumerate(ordered[:20]):
+                rect = pygame.Rect(30, y, 460, 34)
+                self.driver_rects.append((rect, driver))
+                if driver == self.selected_driver:
+                    pygame.draw.rect(screen, (70, 70, 100), rect)
 
-                for i, driver in enumerate(all_results):
-                    rect = pygame.Rect(30, y, 460, 34)
-                    self.driver_rects.append((rect, driver))
-
-                    if driver.is_dnf:
-                        position_text = f"DNF"
-                        gap_str = f"({driver.dnf_reason})"
-                        color = (200, 60, 60)
+                if driver.is_dnf:
+                    gap_str = f"DNF ({get_text(driver.dnf_reason)})"
+                    color = (200, 60, 60)
+                elif driver.finished:
+                    gap_str = f"({driver.total_time:.1f}s)"
+                    color = (180, 180, 180)
+                else:
+                    # Rozestup podle skutečné pozice na trati, ne podle počítadla kol -
+                    # jinak by po každém průjezdu lídra cílovou čárou (a hlavně na
+                    # startu) všichni ostatní na chvíli svítili jako "+1 kolo".
+                    gap_pts = max(0.0, leader_total_pos - (driver.current_lap * leaderboard_path_len
+                                                           + driver.track_index + driver.progress))
+                    if gap_pts < leaderboard_path_len:
+                        gap_str = f"+{gap_pts * (88 / leaderboard_path_len):.1f}s"  # ~88s na kolo
                     else:
-                        position_text = f"{i+1}."
-                        if i < 3:
-                            gap_str = f"({driver.total_time:.1f}s)"
-                        else:
-                            gap_str = f"+{driver.total_time - finished[0].total_time:.1f}s"
-                        color = self.teams.get(driver.team_name, (255,255,255)).color
+                        laps_down = int(gap_pts // leaderboard_path_len)
+                        gap_str = f"+{laps_down} {get_text('LAP' if laps_down == 1 else 'LAPS')}"
+                    color = self.teams.get(driver.team_name, (255,255,255)).color
 
-                    drs = ""  # po závodě už DRS neukazujeme
-                    text = self.font.render(f"{position_text} {driver.name}{drs} | {gap_str}", True, color)
-                    screen.blit(text, (40, y + 7))
-                    y += 38
-
-            else:
-                # === BĚŽNÝ LEADERBOARD BĚHEM ZÁVODU ===
-                # Stejný poziční vzorec jako jinde v kódu (handle_battles, Safety Car) -
-                # dřív tu byly natvrdo konstanty *10000/*100, které by se rozbily na
-                # trati s racing_line delší než 100 bodů (track_index by "přetekl" do
-                # číslice kola).
-                leaderboard_path_len = len(self.current_track["racing_line"])
-                ordered = sorted(self.drivers,
-                               key=lambda d: d.current_lap * leaderboard_path_len + d.track_index + d.progress,
-                               reverse=True)
-                
-                leader_total_pos = (ordered[0].current_lap * leaderboard_path_len
-                                    + ordered[0].track_index + ordered[0].progress) if ordered else 0
-
-                for i, driver in enumerate(ordered[:20]):
-                    rect = pygame.Rect(30, y, 460, 34)
-                    self.driver_rects.append((rect, driver))
-                    if driver == self.selected_driver:
-                        pygame.draw.rect(screen, (70, 70, 100), rect)
-
-                    if driver.is_dnf:
-                        gap_str = f"DNF ({driver.dnf_reason})"
-                        color = (200, 60, 60)
-                    elif driver.finished:
-                        gap_str = f"({driver.total_time:.1f}s)"
-                        color = (180, 180, 180)
-                    else:
-                        # Rozestup podle skutečné pozice na trati, ne podle počítadla kol -
-                        # jinak by po každém průjezdu lídra cílovou čárou (a hlavně na
-                        # startu) všichni ostatní na chvíli svítili jako "+1 kolo".
-                        gap_pts = max(0.0, leader_total_pos - (driver.current_lap * leaderboard_path_len
-                                                               + driver.track_index + driver.progress))
-                        if gap_pts < leaderboard_path_len:
-                            gap_str = f"+{gap_pts * (88 / leaderboard_path_len):.1f}s"  # ~88s na kolo
-                        else:
-                            laps_down = int(gap_pts // leaderboard_path_len)
-                            gap_str = f"+{laps_down} kolo" if laps_down == 1 else f"+{laps_down} kol"
-                        color = self.teams.get(driver.team_name, (255,255,255)).color
-
-                    drs = " DRS" if driver.drs_active else ""
-                    text = self.font.render(f"P{i+1} {driver.name}{drs} | {gap_str}", True, color)
-                    screen.blit(text, (40, y + 7))
-                    y += 38
+                drs = " DRS" if driver.drs_active else ""
+                text = self.font.render(f"P{i+1} {driver.name}{drs} | {gap_str}", True, color)
+                screen.blit(text, (40, y + 7))
+                y += 38
 
             # === MAPA + AUTA ===
             map_x, map_y = 480, 110
@@ -2123,18 +2265,18 @@ class ChampionshipScreen(Screen):
 
             # === PRAVÝ PANEL - STANDINGS ===
             right_x = 1650
-            screen.blit(self.font_big.render("CHAMPIONSHIP STANDINGS", True, (255, 255, 0)), (right_x - 240, 20))
+            screen.blit(self.font_big.render(get_text("TEAM STANDINGS"), True, (255, 255, 0)), (right_x - 240, 20))
             y = 70
             for i, team in enumerate(sorted(self.teams.values(), key=lambda t: t.points, reverse=True)[:10]):
-                txt = self.font.render(f"{i+1}. {team.name}: {team.points} pts", True, team.color)
+                txt = self.font.render(f"{i+1}. {team.name}: {team.points} {get_text('PTS')}", True, team.color)
                 screen.blit(txt, (right_x - 240, y))
                 y += 28
 
-            screen.blit(self.font_big.render("DRIVERS STANDINGS", True, (255, 220, 100)), (right_x - 210, y + 30))
+            screen.blit(self.font_big.render(get_text("DRIVER STANDINGS"), True, (255, 220, 100)), (right_x - 240, y + 30))
             y += 60
             for i, driver in enumerate(sorted(self.drivers, key=lambda d: d.points, reverse=True)[:20]):
                 color = self.teams.get(driver.team_name, (200,200,200)).color
-                txt = self.font.render(f"{i+1}. {driver.name} — {driver.points} pts", True, color)
+                txt = self.font.render(f"{i+1}. {driver.name} — {driver.points} {get_text('PTS')}", True, color)
                 screen.blit(txt, (right_x - 240, y))
                 y += 26
 
@@ -2165,20 +2307,6 @@ class ChampionshipScreen(Screen):
                     txt = self.font.render(tire, True, (0,0,0))
                     screen.blit(txt, txt.get_rect(center=btn.center))
                     self.tire_select_buttons.append((btn, tire))
-
-            # Overlay po skončení závodu
-            if self.race_finished:
-                overlay = pygame.Rect(520, 340, 680, 220)
-                pygame.draw.rect(screen, (20,20,30), overlay)
-                pygame.draw.rect(screen, (255,215,0), overlay, 6)
-                screen.blit(self.font_big.render("ZÁVOD SKONČIL", True, (255,215,0)), (650, 370))
-
-                self.next_race_button = pygame.Rect(680, 460, 360, 70)
-                pygame.draw.rect(screen, (80,200,100), self.next_race_button)
-                screen.blit(self.font.render("DALŠÍ ZÁVOD →", True, (255,255,255)), 
-                            self.font.render("DALŠÍ ZÁVOD →", True, (255,255,255)).get_rect(center=self.next_race_button.center))
-
-                pass
 
             # Zobrazení zprávy (uložení / načtení / seznam)
             if self.save_message_timer > 0:
