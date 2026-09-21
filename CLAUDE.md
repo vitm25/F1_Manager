@@ -52,6 +52,13 @@ vždy ho načítat přes `os.path.join(SCRIPT_DIR, ...)`, jinak se stejný bug v
   posledním závodě sezóny (`current_race_index + 1 == len(CALENDAR_2025)`) při titulu
   konstruktérů nebo jezdců hráčova týmu (`_player_won_championship()`, volá se z
   `finish_race()`). Chybí-li `strange.mp3`, u výhry závodu se použije běžný zvuk výhry.
+- **Formát souborů:** pygame čte jen SKUTEČNÉ mp3/wav/ogg. Soubor z telefonu/editoru, který je
+  ve skutečnosti MP4/M4A (AAC) jen přejmenovaný na `.mp3`, skončí chybou "Unrecognized audio
+  format" (konzole to pozná a napíše důvod, viz `audio_problem_hint`). Tak to bylo u `radio_open`
+  a `strange` - vedle originálů proto leží převedené `radio_open.wav` a `strange.wav`; loader
+  (`load_sfx_named`, `find_sound_files`) zkouší přípony mp3 -> wav -> ogg a nečitelný soubor
+  přeskočí. Originály se nikdy nepřepisují. Složka `sound kopie/` je záloha od uživatele -
+  hra ji nepoužívá a testy do ní ani do `sounds/` nesmí zapisovat.
 - Přehrávání jde přes `play_first_existing_sound(paths, label)` (bere první existující
   soubor, chyby audia jen vypíše - kvůli PC bez zvuku), `stop_sound()`; použité i pro start
   komentář. Cesty vždy přes `SCRIPT_DIR`.

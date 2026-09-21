@@ -80,7 +80,7 @@ WIN_SOUND_ANY = os.path.join(SCRIPT_DIR, "sounds", "win.mp3")
 # "Strange sound" - vlastní zvuk, který si hráč vloží sám (sounds/strange.mp3) a zapne v
 # Nastavení. Když je zapnutý, přehraje se místo běžného zvuku výhry: po výhře jezdce hráčova
 # týmu v závodě a na konci sezóny po titulu v poháru konstruktérů / v šampionátu jezdců.
-STRANGE_SOUND = os.path.join(SCRIPT_DIR, "sounds", "strange.mp3")
+STRANGE_SOUND = "strange"      # sounds/strange.mp3|wav|ogg
 STRANGE_SOUND_ENABLED = False
 
 # === RÁDIO BOXOVÉ ZDI (po "BOX THIS LAP" v panelu pit stopu) ===
@@ -192,21 +192,37 @@ TEXTS = {
     "FRAMERATE (FPS)": {"CS": "FRAMERATE (FPS)", "EN": "FRAMERATE (FPS)", "IT": "FREQUENZA DEI FRAME"},
 }
 
+def audio_problem_hint(path):
+    """Vysvětlení, proč pygame soubor nepřečetl. Nejčastější past: video/audio z telefonu či
+    editoru (MP4/M4A, AAC) jen PŘEJMENOVANÉ na .mp3 - pygame umí jen skutečné mp3/wav/ogg."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(12)
+        if head[4:8] == b"ftyp":
+            return "soubor je ve skutečnosti MP4/M4A (jen přejmenovaný na příponu) - převeď ho na skutečné mp3/wav/ogg"
+    except OSError:
+        pass
+    return ""
+
+
 def play_first_existing_sound(paths, label):
-    """Přehraje první existující soubor ze seznamu. Vrací True, když se něco přehrálo.
+    """Přehraje první přehratelný soubor ze seznamu (nečitelný přeskočí a zkusí další).
+    Vrací True, když se něco přehrálo.
 
     Chybějící soubor ani nefunkční audio (školní PC bez zvuku) hru nikdy nezastaví."""
+    found = False
     for path in paths:
         if os.path.exists(path):
+            found = True
             try:
                 pygame.mixer.music.load(path)
                 pygame.mixer.music.play()
                 print(f"▶️ Přehrávám: {label} ({os.path.basename(path)})")
                 return True
             except Exception as e:
-                print(f"❌ Chyba při přehrávání audia ({label}): {e}")
-                return False
-    print(f"⚠️ Audio '{label}' nenalezeno v 'sounds/' složce")
+                print(f"❌ Chyba při přehrávání audia ({label}, {os.path.basename(path)}): {e} {audio_problem_hint(path)}")
+    if not found:
+        print(f"⚠️ Audio '{label}' nenalezeno v 'sounds/' složce")
     return False
 
 
@@ -217,13 +233,10 @@ def stop_sound():
         pass
 
 
-def find_sound_file(name):
-    """Cesta k sounds/<name>.mp3|wav|ogg (první existující), jinak None."""
-    for ext in SOUND_EXTENSIONS:
-        path = os.path.join(SCRIPT_DIR, "sounds", name + ext)
-        if os.path.exists(path):
-            return path
-    return None
+def find_sound_files(name):
+    """Všechny existující soubory sounds/<name>.mp3|wav|ogg (v tomto pořadí přípon)."""
+    paths = (os.path.join(SCRIPT_DIR, "sounds", name + ext) for ext in SOUND_EXTENSIONS)
+    return [p for p in paths if os.path.exists(p)]
 
 
 _SFX_CACHE = {}
@@ -238,9 +251,19 @@ def load_sfx(path):
         try:
             _SFX_CACHE[path] = pygame.mixer.Sound(path)
         except Exception as e:
-            print(f"❌ Zvuk se nepodařilo načíst ({os.path.basename(path)}): {e}")
+            print(f"❌ Zvuk se nepodařilo načíst ({os.path.basename(path)}): {e} {audio_problem_hint(path)}")
             _SFX_CACHE[path] = None
     return _SFX_CACHE[path]
+
+
+def load_sfx_named(name):
+    """Efekt sounds/<name>.mp3|wav|ogg - když je první nečitelný (třeba MP4 přejmenované na
+    .mp3), zkusí další příponu. None, když se nepodařilo načíst žádný."""
+    for path in find_sound_files(name):
+        sound = load_sfx(path)
+        if sound is not None:
+            return sound
+    return None
 
 
 def recommended_tire(race, driver):
@@ -1223,7 +1246,7 @@ class ChampionshipScreen(Screen):
                         and finished_drivers[0].team_name == self.player_team.name)
         title_won = self._player_won_championship()
         strange_played = (STRANGE_SOUND_ENABLED and (race_win or title_won)
-                          and play_first_existing_sound([STRANGE_SOUND], "strange sound"))
+                          and play_first_existing_sound(find_sound_files(STRANGE_SOUND), "strange sound"))
         if race_win and not strange_played:   # bez strange.mp3 zůstane běžný zvuk výhry
             self._play_win_sound()
 
@@ -1718,23 +1741,18 @@ class ChampionshipScreen(Screen):
         "Box, box" nebo "Box this lap". Bez souborů se ukáže jen titulek."""
         # Losuje se jen z hlášek, které mají nahraný soubor - jinak by se při chybějící
         # nahrávce půlka pit stopů odbyla v tichu ("audio se někdy spustí a někdy ne").
-        lines = [(text, name, find_sound_file(name)) for text, name in RADIO_VOICE_LINES]
-        for text, name, path in lines:
-            if not path:
-                print(f"⚠️ Rádio: chybí sounds/{name}.mp3 (nebo .wav/.ogg)")
-        text, _, voice_path = random.choice([l for l in lines if l[2]] or lines)
+        lines = [(text, name, load_sfx_named(name)) for text, name in RADIO_VOICE_LINES]
+        for text, name, sound in lines:
+            if sound is None:
+                print(f"⚠️ Rádio: sounds/{name} chybí nebo nejde přehrát (mp3/wav/ogg)")
+        text, _, voice = random.choice([l for l in lines if l[2] is not None] or lines)
         intro = None
         if RADIO_INTRO_MODE == "BEEP":
-            intro_path = find_sound_file(RADIO_INTRO_BEEP)
-            if not intro_path:
-                print(f"⚠️ Rádio: chybí sounds/{RADIO_INTRO_BEEP}.mp3 (nebo .wav/.ogg) - úvodní pípnutí bude vynecháno")
-            intro = load_sfx(intro_path)
+            intro = load_sfx_named(RADIO_INTRO_BEEP)
         elif RADIO_INTRO_MODE == "STRANGE":
-            intro_path = find_sound_file("strange")
-            if not intro_path:
-                print("⚠️ Rádio: chybí sounds/strange.mp3 (nebo .wav/.ogg) - úvodní zvuk bude vynechán")
-            intro = load_sfx(intro_path)
-        voice = load_sfx(voice_path)
+            intro = load_sfx_named(STRANGE_SOUND)
+        if intro is None and RADIO_INTRO_MODE != "OFF":
+            print("⚠️ Rádio: úvodní zvuk chybí nebo nejde přehrát - bude vynechán")
 
         voice_at = 0.0
         if intro:
