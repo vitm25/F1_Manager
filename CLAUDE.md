@@ -7,6 +7,26 @@ Pygame F1 Manager simulace sezóny 2025. Hráč vybere tým, řídí strategii (
 boxy) a sleduje závody v reálném čase se zrychlením času. Kód je z velké části
 monolitický v `manager.py`.
 
+## Okno a škálování na libovolný displej
+Celá hra se kreslí na pevné logické plátno `canvas` (= `screen`) `WIDTH x HEIGHT` =
+1920x1080 - všechny souřadnice v UI jsou pro něj a NEMĚNÍ se. Do okna se plátno každý
+snímek přeškáluje v `present_frame()` (smoothscale, zachovaný poměr 16:9, černé okraje
+= letterbox, např. na 2560x1600 vznikne pruh nahoře a dole).
+- Okno: `apply_display_mode()` - v okně `fit_window_size()` (největší 16:9, které se vejde
+  na plochu i s titulkem a hlavním panelem, `pygame.RESIZABLE` = jde ručně zvětšovat),
+  na celou obrazovku nativní rozlišení desktopu. Přepínání: tlačítko v Nastavení i
+  klávesa F11 (`toggle_fullscreen()`).
+- **Myš:** VŽDY `get_mouse_pos()` (přepočet okno -> logické souřadnice), nikdy
+  `pygame.mouse.get_pos()` přímo, jinak by klikání na jiném než 1920x1080 míjelo tlačítka.
+- Windows: před `pygame.init()` se volá `SetProcessDPIAware()`, aby hra na displeji se
+  zvětšením 125-150 % (typicky notebook 2560x1600) dostala skutečné pixely a nebyla
+  OS-rozmazaná.
+- Nastavení FPS teď opravdu funguje: hlavní smyčka používá `CURRENT_FPS` (dřív
+  natvrdo konstantu `FPS = 60`, kterou Nastavení nemělo jak změnit).
+- Ověřeno headless (dummy driver): velikost okna pro 1366x768 až 3840x2160, letterbox,
+  mapování myši tam a zpět. NEověřeno na skutečném displeji (DPI awareness, F11 na
+  reálné obrazovce) - stojí za to zkusit ručně.
+
 ## Cesty k souborům (mapy, zvuky, uložené hry)
 Všechny cesty k assetům (mapa tratě `tracks_data.py -> "map"`, zvuky `START_COMMENT_CS/EN`,
 `save_folder`) se skládají přes `SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))`
@@ -167,6 +187,62 @@ Race phases jsou `FORMATION` → `START` → `RACING`. Fáze `START` je startovn
   přepne na 1), takže konec závodu je `leader.current_lap > laps` (dřív `>=` = závod
   byl o kolo kratší, 57 místo 58), a hlavička "Kolo N/M" se ořezává na `laps`.
 
+## Pit stopy (skutečný průjezd boxovou uličkou)
+Dřív se pit stop simuloval tak, že auto po žádosti hned na místě "zamrzlo" na 5 s a pak
+se přeskočilo o 8 bodů dopředu (zisk pozice, ne ztráta). Teď:
+- **Stavy** (`Driver.pit_phase`, plus `in_pit`/`on_pit_lane` = True po celou dobu):
+  žádost (`pit_requested`, hráč tlačítkem BOX / AI přes `ai_should_pit`) → auto jede dál
+  po trati, až dojede k vjezdu do uličky (`d < PIT_ENTRY_WINDOW`) → `"ENTRY"` (jede
+  uličkou pit limiterem = `get_speed` × 0.4) → dojede k boxu SVÉHO týmu → `"SERVICE"`
+  (`get_speed` vrací 0, stojí `PIT_TIME / time_compression`; potom výměna gum,
+  `current_stint_laps = 0`, AI přeplánuje stint) → `"EXIT"` → na konci uličky zpět na trať.
+  Logika je v `ChampionshipScreen._update_pit()`, volá se z hlavní smyčky v `update()`.
+- Virtuální pozice auta (`track_index`/`progress`) se nikdy nepřeskakuje - ulička je jen
+  "interval bodů racing_line od vjezdu o `length` bodů", takže řazení, počítání kol
+  (i přejezd cílové čáry v uličce) a Safety Car fungují beze změny. Auto v uličce je
+  vyřazené z `handle_battles`/`update_drs`/fronty za SC (`in_pit`).
+- **Geometrie:** `get_pit_geometry(track)` (vjezd, délka v bodech z `PIT_LANE_LENGTH_M`
+  a reálné délky okruhu, strana) a `pit_lane_position()` (souřadnice na mapě = bod
+  racing_line + boční odsazení `PIT_LANE_OFFSET_PX` s plynulým odklonem/návratem).
+  Ulička se ODVOZUJE z `racing_line`; ručně nakreslená `pit_lane` v `tracks_data.py` je
+  u ~třetiny tratí stovky pixelů vedle racing_line (nenavazuje), proto slouží jen jako
+  nápověda pro místo vjezdu a stranu (a jen když sedí do 45 px). Boxy týmů = malé barevné
+  čtverečky v uličce (`pit_box_distance`), druhý jezdec týmu stojí o kousek dřív.
+- Ztráta času (změřeno na všech 24 tratích, SHORT i FULL shodně): ~21-39 % kola v
+  uličce vč. zastávky, čistá ztráta ~20-27 % kola - blízko realitě (20-25 s z ~80 s).
+- UI: tlačítko BOX u hráčových jezdců je červené (klid) / žluté (pit požadován, čeká na
+  vjezd) / zelené (v uličce). Opětovné zadání pitu během průjezdu uličkou se ignoruje.
+
+## Počasí a vlhkost trati (`WEATHER_TYPES` nahrazeno)
+- Počasí `SUN`/`CLOUD`/`RAIN` se každé `WEATHER_CHANGE_LAPS` (4) kola lídra mění podle
+  `WEATHER_TRANSITIONS` (Markovův řetězec: déšť nepřijde z čistého nebe, SUN→CLOUD→RAIN).
+  Ladění: ~39 % závodů má někdy déšť, ~6 % času prší (původní nezávislý los 65/23/12 dával
+  80 % závodů s deštěm). Start je vždy SUN.
+- **Vlhkost trati** `track_wetness` (0-1): v dešti stoupá (celá trať promokne za
+  `WETTING_LAPS` = 3 kola), jinak schne (`DRYING_LAPS`: SUN 5 kol, CLOUD 9 kol) - počítá se
+  v "kolech" (`path_len / time_compression`), takže je stejné na všech tratích i v SHORT/FULL.
+  Ukládá se do savu (`track_wetness`).
+- **Tempo:** `get_speed()` násobí `tire_grip(tire, wetness)` - parabola kolem optimální
+  vlhkosti gumy (slick 0, inter 0,5, wet 1; profily v `TIRE_GRIP_PROFILE`). Slick při
+  vlhkosti 0,5 ztrácí 15 %, při 1,0 přes 55 %; inter na suchu ~10 %, wet na suchu ~28 %.
+  Nahrazuje původní ručně natvrdo zadané `SOFT*0.85 / INTER*1.05` v dešti.
+- **Opotřebení:** inter/wet na sušší trati se ničí až 2-3,5x rychleji
+  (`tire_wear_weather_factor`), slicky beze změny.
+- **AI přezouvání** (`ai_should_pit`, `ai_choose_tire`) podle vlhkosti + osobní
+  `driver.weather_bias` (každý reaguje v trochu jiný okamžik, ne všichni naráz): slick→inter
+  od `AI_INTER_WETNESS` 0,30, inter→wet od 0,78, wet→inter pod 0,50, inter→slick pod 0,15 (a
+  nesprchává). Mezi "nahoru" a "dolů" je záměrně mezera (hystereze), aby se auta nepřezouvala
+  sem a tam. Přezutí kvůli počasí se řeší i hned po poslední zastávce (obchází 6kolové
+  pravidlo). `ai_choose_tire`/`ai_choose_pace` teď berou `race`/vlhkost, ne řetězec počasí.
+- **Bezpečnost:** `generate_incident` má riziko `1 + 1,5*wetness` (+2,5 při slicku s
+  přilnavostí < 0,8); náhodný Safety Car je také častější na mokru. DRS je zakázané při
+  `wetness >= DRS_MAX_WETNESS` (0,25).
+- **Zobrazení:** hlavička ukazuje počasí (lokalizované `WEATHER_*`) a "Vlhkost trati: N %";
+  přes mapu se ztmavením podle vlhkosti/oblačnosti a padající déšť při `RAIN`.
+- Vedlejší: nápisy Safety Car / VSC / žlutá vlajka (`FLAG_*`) jsou lokalizované a bez
+  emoji (v herním fontu se kreslily jako čtverečky) a už nepřekrývají "Championship
+  standings".
+
 ## Pit stopy / stinty pneumatik – opraveno (počítání i wear rate)
 Dřív `ai_should_pit()` počítalo `driver.current_stint_laps += 1` při KAŽDÉM AI
 rozhodovacím tiku (~každých 0.9 s), ne jednou za skutečně dojeté kolo, a navíc to
@@ -273,11 +349,9 @@ auto-save po závodě, in-game menu (ESC), Settings (FPS, Race Length, Language)
 
 ## TODO priority
 **Vysoká:** žádná otevřená (viz opravy výše).
-**Střední:** doplnit chybějící překlady hardcoded textů; `WEATHER_TYPES` dict
-(`wear_modifier`/`lap_modifier`) je definovaný, ale nikde se nepoužívá - CLOUD počasí
-tak nemá žádný herní efekt (jen RAIN je ručně ošetřený v `get_speed()`); pokud se má
-počasí reálně promítat do rychlosti/opotřebení, je potřeba to promyslet a napojit
-(riziko rozladění tempa, radši nedělat bez odsouhlasení).
+**Střední:** doplnit chybějící překlady hardcoded textů (např. "kolo/kol" v leaderboardu,
+"ULOŽENÉ HRY"); pit stopy: double-stack (oba jezdci týmu se dvěma auty v boxu naráz
+nečekají na sebe), v uličce se nekontroluje kolize aut; počasí: bez předpovědi.
 **Střední (k ověření s uživatelem):** `load_game()` obnoví jezdce (kola, pozice, gumy...) a hned
 potom zavolá `_load_race()`, které je celé resetuje - reálně se tedy načte jen šampionát
 (body, kolo sezóny) a závod začne znovu formačním kolem. Nejspíš to není záměr (uložení

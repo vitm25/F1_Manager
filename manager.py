@@ -13,6 +13,17 @@ from championship_data import TEAMS, DRIVER_BASE_TIMES, CALENDAR_2025
 # toho, odkud/čím se hra spouští - dvojklik, IDE, terminál...).
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Na Windows s displejem se zvětšením (typicky 125-150 % u notebooků s 2560x1600) by
+# okno jinak OS roztáhl a rozmazal a pygame by hlásil zmenšené "virtuální" rozlišení
+# plochy. S DPI awareness dostane hra skutečné pixely displeje.
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+os.environ.setdefault("SDL_VIDEO_CENTERED", "1")
+
 pygame.init()
 
 # === BEZPEČNÁ AUDIO INICIALIZACE (pro školní PC) ===
@@ -70,9 +81,16 @@ TEXTS = {
     "Kolo": {"CS": "Kolo", "EN": "Lap", "IT": "GIRO"},
     "Čas:": {"CS": "Čas:", "EN": "Time:", "IT": "ORA"},
     "Počasí:": {"CS": "Počasí:", "EN": "Weather:", "IT": "METEO"},
+    "WEATHER_SUN": {"CS": "SLUNCE", "EN": "SUNNY", "IT": "SOLE"},
+    "WEATHER_CLOUD": {"CS": "OBLAČNO", "EN": "CLOUDY", "IT": "NUVOLOSO"},
+    "WEATHER_RAIN": {"CS": "DÉŠŤ", "EN": "RAIN", "IT": "PIOGGIA"},
+    "Vlhkost trati:": {"CS": "Vlhkost trati:", "EN": "Track wetness:", "IT": "UMIDITÀ PISTA:"},
     "Gumy:": {"CS": "Gumy:", "EN": "Tires:", "IT": "PNEUMATICI"},
     "Opotřebení kol:": {"CS": "Opotřebení kol:", "EN": "Tire Wear:", "IT": "USURA DELLE RUOTE"},
     "FORMATION LAP": {"CS": "FORMACE KOLO", "EN": "FORMATION LAP", "IT": "GIRO DI FORMAZIONE"},
+    "FLAG_SC": {"CS": "SAFETY CAR", "EN": "SAFETY CAR", "IT": "SAFETY CAR"},
+    "FLAG_VSC": {"CS": "VIRTUÁLNÍ SC", "EN": "VIRTUAL SC", "IT": "SC VIRTUALE"},
+    "FLAG_YELLOW": {"CS": "ŽLUTÁ VLAJKA", "EN": "YELLOW FLAG", "IT": "BANDIERA GIALLA"},
     "START LIGHTS": {"CS": "STARTOVNÍ SEMAFOR", "EN": "START LIGHTS", "IT": "SEMAFORI DI PARTENZA"},
     "LIGHTS OUT...": {"CS": "SVĚTLA ZHASLA...", "EN": "LIGHTS OUT...", "IT": "LE LUCI SI SONO SPENTE..."},
     "VYBERTE SVŮJ TÝM": {"CS": "VYBERTE SVŮJ TÝM", "EN": "CHOOSE YOUR TEAM", "IT": "SCEGLI LA TUA SQUADRA"},
@@ -94,11 +112,81 @@ def get_text(key, lang=None):
 
 WIDTH = 1920
 HEIGHT = 1080
-FPS = 60
 
-#vykreslení okna
-screen = pygame.display.set_mode([WIDTH, HEIGHT])
+# === OKNO A ŠKÁLOVÁNÍ NA LIBOVOLNÝ DISPLEJ ===
+# Celá hra se kreslí na pevné "logické" plátno WIDTH x HEIGHT (1920x1080) - všechny
+# souřadnice v UI jsou pro něj. Do okna se plátno každý snímek přeškáluje (se
+# zachováním poměru stran, případné okraje jsou černé) a myš se přepočítává zpátky
+# na souřadnice plátna (get_mouse_pos). Díky tomu hra sedí na displeji 1366x768,
+# 1920x1080, 2560x1600, 3840x2160... a okno jde libovolně zvětšovat/zmenšovat.
+def get_desktop_size():
+    try:
+        sizes = pygame.display.get_desktop_sizes()
+        if sizes:
+            return sizes[0]
+    except Exception:
+        pass
+    info = pygame.display.Info()
+    return info.current_w, info.current_h
+
+
+def fit_window_size(desktop_w, desktop_h):
+    """Největší okno v poměru 16:9, které se vejde na plochu i s titulkem a hlavním panelem."""
+    scale = min(desktop_w * 0.95 / WIDTH, desktop_h * 0.88 / HEIGHT)
+    return max(640, int(WIDTH * scale)), max(360, int(HEIGHT * scale))
+
+
+def apply_display_mode():
+    """Vytvoří okno podle IS_FULLSCREEN (celá obrazovka v nativním rozlišení / okno na míru)."""
+    desktop = get_desktop_size()
+    if IS_FULLSCREEN:
+        pygame.display.set_mode(desktop, pygame.FULLSCREEN)
+    else:
+        pygame.display.set_mode(fit_window_size(*desktop), pygame.RESIZABLE)
+
+
+def toggle_fullscreen():
+    global IS_FULLSCREEN
+    IS_FULLSCREEN = not IS_FULLSCREEN
+    apply_display_mode()
+
+
+apply_display_mode()
 pygame.display.set_caption("F1 manažer")
+
+canvas = pygame.Surface((WIDTH, HEIGHT)).convert()
+screen = canvas  # všechny screeny kreslí sem, do okna se to přenáší v present_frame()
+view_rect = pygame.Rect(0, 0, WIDTH, HEIGHT)  # kam v okně leží plátno
+_scaled_buffer = None
+
+
+def present_frame():
+    """Přeškáluje plátno do okna (letterbox) a zobrazí ho."""
+    global view_rect, _scaled_buffer
+    window = pygame.display.get_surface()
+    win_w, win_h = window.get_size()
+    scale = min(win_w / WIDTH, win_h / HEIGHT)
+    target_w, target_h = max(1, int(WIDTH * scale)), max(1, int(HEIGHT * scale))
+    view_rect = pygame.Rect((win_w - target_w) // 2, (win_h - target_h) // 2, target_w, target_h)
+
+    if (target_w, target_h) != (win_w, win_h):
+        window.fill((0, 0, 0))
+    if (target_w, target_h) == (WIDTH, HEIGHT):
+        window.blit(canvas, view_rect.topleft)
+    else:
+        if _scaled_buffer is None or _scaled_buffer.get_size() != (target_w, target_h):
+            _scaled_buffer = pygame.Surface((target_w, target_h)).convert()
+        pygame.transform.smoothscale(canvas, (target_w, target_h), _scaled_buffer)
+        window.blit(_scaled_buffer, view_rect.topleft)
+    pygame.display.flip()
+
+
+def get_mouse_pos():
+    """Pozice myši v souřadnicích logického plátna (1920x1080), ne okna."""
+    mouse_x, mouse_y = pygame.mouse.get_pos()
+    return (int((mouse_x - view_rect.x) * WIDTH / view_rect.w),
+            int((mouse_y - view_rect.y) * HEIGHT / view_rect.h))
+
 
 clock = pygame.time.Clock()
 
@@ -136,11 +224,55 @@ TIRE_WEAR_PER_LAP = {
 
 POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
 
-WEATHER_TYPES = {
-    "SUN": {"lap_modifier": 0.0, "wear_modifier": 1.0},
-    "CLOUD": {"lap_modifier": 0.1, "wear_modifier": 1.1},
-    "RAIN": {"lap_modifier": 0.8, "wear_modifier": 1.6},
+# === POČASÍ A VLHKOST TRATĚ ===
+# Počasí (SUN / CLOUD / RAIN) se mění každých WEATHER_CHANGE_LAPS kol podle tabulky
+# přechodů - déšť nepřichází z čistého nebe (SUN -> CLOUD -> RAIN a zpátky). Hlavně ale
+# počasí řídí VLHKOST TRATĚ (0-1): v dešti stoupá, jinak postupně schne (pod sluncem
+# rychleji než pod mrakem). Tempo, opotřebení i volba pneumatik závisí na vlhkosti
+# trati, ne na okamžitém počasí - takže po dešti chvíli zůstane mokro a tým musí
+# načasovat přezutí na inter/wet a zpět na slick.
+WEATHER_TRANSITIONS = {
+    "SUN":   (("SUN", 0.85), ("CLOUD", 0.14), ("RAIN", 0.01)),
+    "CLOUD": (("SUN", 0.35), ("CLOUD", 0.53), ("RAIN", 0.12)),
+    "RAIN":  (("SUN", 0.10), ("CLOUD", 0.45), ("RAIN", 0.45)),
 }
+WETTING_LAPS = 3.0                                     # za kolik kol v dešti trať úplně promokne
+DRYING_LAPS = {"SUN": 5.0, "CLOUD": 9.0}               # za kolik kol uschne z plné vlhkosti (RAIN nesuší)
+DRY_TIRES = ("SOFT", "MEDIUM", "HARD")
+# Přilnavost gumy podle vlhkosti trati: (vlhkost s nejlepší přilnavostí, maximum, strmost poklesu)
+TIRE_GRIP_PROFILE = {
+    "SOFT":   (0.0, 1.0, 0.60),
+    "MEDIUM": (0.0, 1.0, 0.58),
+    "HARD":   (0.0, 1.0, 0.55),
+    "INTER":  (0.5, 1.0, 0.40),
+    "WET":    (1.0, 1.0, 0.28),
+}
+DRS_MAX_WETNESS = 0.25       # při větší vlhkosti trati je DRS zakázané
+# Prahy, při kterých se AI přezouvá (k vlhkosti se přičítá osobní driver.weather_bias,
+# takže neridí všichni ve stejný okamžik). Mezi "nahoru" a "dolů" je záměrně mezera
+# (hystereze), aby se auta nepřezouvala sem a tam.
+AI_INTER_WETNESS = 0.30      # od téhle vlhkosti inter místo slicku
+AI_WET_TIRE_WETNESS = 0.78   # od téhle vlhkosti wet místo interu
+AI_INTER_TO_DRY = 0.15       # pod touhle vlhkostí (a mimo déšť) zpět na slick
+AI_WET_TO_INTER = 0.50       # pod touhle vlhkostí z wet zpět na inter
+
+
+def tire_grip(tire, wetness):
+    """Násobek rychlosti podle toho, jak se guma hodí na aktuální vlhkost trati."""
+    optimum, peak, steepness = TIRE_GRIP_PROFILE[tire]
+    return max(0.3, peak - steepness * (wetness - optimum) ** 2)
+
+
+def tire_wear_weather_factor(tire, wetness):
+    """Inter/wet na sušší trati se ničí mnohem rychleji (přehřívají se); slicky ne."""
+    if tire in DRY_TIRES:
+        return 1.0
+    return 1.0 + 2.5 * max(0.0, TIRE_GRIP_PROFILE[tire][0] - wetness)
+
+
+def next_weather(current):
+    names, weights = zip(*WEATHER_TRANSITIONS[current])
+    return random.choices(names, weights=weights)[0]
 
 PACE = {
     "PUSH": {"pace": -0.4, "wear": 1.6},
@@ -213,13 +345,14 @@ class Driver: # jezdec
 
         self.pit_requested = False
         self.on_pit_lane = False
-        self.pit_lane_index = 0
-        self.pit_lane_progress = 0.0
+        self.pit_phase = None       # None / "ENTRY" (jede k boxu) / "SERVICE" (stojí v boxu) / "EXIT"
+        self.pit_box_d = 0.0        # kde v boxové uličce (v bodech racing_line od vjezdu) je box týmu
 
                 # === NOVÉ STRATEGIE ===
         self.current_stint_laps = 0          # kolik kol už jel na těchto gumách
         self.target_stint_end = 0            # na kterém kole plánuje pit
         self.strategy_aggression = random.uniform(0.75, 1.35)  # <1 = konzervativní, >1 = agresivní
+        self.weather_bias = random.uniform(-0.06, 0.08)        # o kolik dřív/později než ostatní reaguje na změnu vlhkosti
         self.planned_stops = random.choice([1, 2])            # 1-stop nebo 2-stop
         self.undercut_chance = 0.0
 
@@ -237,6 +370,9 @@ def get_speed(driver, race):
         # Auta mimo pit jedou pod SC rychlostí danou frontou za safety carem
         # (viz ChampionshipScreen.update_safety_car / get_safety_car_speed)
         return race.get_safety_car_speed(driver)
+
+    if driver.pit_phase == "SERVICE":
+        return 0.0  # stojí u svého boxu (výměna pneumatik)
 
     if race.race_phase == RACE_PHASE_START and not driver.in_pit:
         # Startovní semafor: auta stojí na roštu, dokud světla nezhasnou.
@@ -262,11 +398,7 @@ def get_speed(driver, race):
     speed = driver.base_speed
     speed *= (1 - driver.tire_wear * 0.4)
 
-    if race.current_weather == "RAIN":
-        if driver.tire == "SOFT":
-            speed *= 0.85
-        elif driver.tire == "INTER":
-            speed *= 1.05
+    speed *= tire_grip(driver.tire, race.track_wetness)
 
     if driver.in_pit:
         speed *= 0.4
@@ -276,7 +408,16 @@ def get_speed(driver, race):
 
     return speed
 
+# === PIT STOPY ===
+# Auto po žádosti o pit (hráč tlačítkem BOX, AI strategií) dojede k vjezdu do boxové
+# uličky, projede ji sníženou rychlostí (viz get_speed: in_pit = 0.4x), ZASTAVÍ u boxu
+# svého týmu na PIT_TIME (v "komprimovaných" sekundách, tj. při SHORT módu se dělí
+# time_compression - stejný podíl kola v obou režimech), vymění gumy a odjede zpět na trať.
 PIT_TIME = 5.0
+PIT_LANE_LENGTH_M = 400.0    # reálná délka boxové uličky - z ní se dopočítá počet bodů racing_line
+PIT_LANE_OFFSET_PX = 28.0    # o kolik pixelů (zdrojové souřadnice mapy) je ulička vedle trati
+PIT_LANE_BLEND = 0.6         # na kolika bodech trati se auto odklání do uličky / vrací zpět
+PIT_ENTRY_WINDOW = 0.6       # v jaké vzdálenosti za vjezdem se ještě dá do uličky zatočit
 
 # === FORMAČNÍ KOLO – pevné pořadí podle roštu, žádné předjíždění ===
 # Délka formačního kola = reálná délka okruhu / průměrná rychlost formace. Reálné
@@ -306,6 +447,75 @@ def formation_lap_duration(track):
 
 
 FORMATION_GRID_GAP = 0.5     # o kolik race_time sekund později se rozjede každé další auto na roštu
+
+
+_pit_geometry_cache = {}
+
+
+def get_pit_geometry(track):
+    """Geometrie boxové uličky: vjezd (index racing_line), délka v bodech a strana trati.
+
+    Ulička se odvozuje z racing_line (běží podél ní od vjezdu o `length` bodů, s bočním
+    odsazením), protože ručně nakreslená polyline `pit_lane` v tracks_data.py u
+    zhruba třetiny tratí vůbec nenavazuje na racing_line (stovky pixelů vedle). Data z
+    `pit_lane` se používají jen jako nápověda pro místo vjezdu a stranu, pokud sedí.
+    """
+    name = track.get("name")
+    if name in _pit_geometry_cache:
+        return _pit_geometry_cache[name]
+
+    rl = track["racing_line"]
+    n = len(rl)
+    step_m = TRACK_LENGTH_KM.get(name, 5.0) * 1000.0 / n
+    length = max(2, min(12, round(PIT_LANE_LENGTH_M / step_m)))
+    entry = (n - 2) % n
+    side = 1
+
+    hint = track.get("pit_lane")
+    if hint:
+        px, py = hint[0]
+        dists = [math.hypot(px - q[0], py - q[1]) for q in rl]
+        i = min(range(n), key=lambda k: dists[k])
+        if dists[i] <= 45:
+            entry = i
+            dx, dy = rl[(i + 1) % n][0] - rl[i][0], rl[(i + 1) % n][1] - rl[i][1]
+            norm = math.hypot(dx, dy) or 1.0
+            dot = (-dy / norm) * (px - rl[i][0]) + (dx / norm) * (py - rl[i][1])
+            if abs(dot) > 2:
+                side = 1 if dot > 0 else -1
+
+    geometry = {"entry": entry, "length": length, "side": side}
+    _pit_geometry_cache[name] = geometry
+    return geometry
+
+
+def pit_lane_position(track, geometry, pos, extra=0.0):
+    """Souřadnice na mapě (zdrojové) pro virtuální pozici pos (index + progress) v boxové uličce."""
+    rl = track["racing_line"]
+    n = len(rl)
+    pos %= n
+    i = int(pos)
+    frac = pos - i
+    x1, y1 = rl[i]
+    x2, y2 = rl[(i + 1) % n]
+    x = x1 + (x2 - x1) * frac
+    y = y1 + (y2 - y1) * frac
+
+    d = (pos - geometry["entry"]) % n
+    length = geometry["length"]
+    if d > length:
+        return x, y
+    weight = max(0.0, min(1.0, d / PIT_LANE_BLEND, (length - d) / PIT_LANE_BLEND))
+    dx, dy = x2 - x1, y2 - y1
+    norm = math.hypot(dx, dy) or 1.0
+    offset = (PIT_LANE_OFFSET_PX + extra) * weight * geometry["side"]
+    return x + (-dy / norm) * offset, y + (dx / norm) * offset
+
+
+def pit_box_distance(geometry, team_index, team_count, slot):
+    """Kde v uličce (od vjezdu, v bodech trati) stojí box týmu; druhý jezdec o kousek dřív."""
+    fraction = 0.3 + 0.4 * team_index / max(1, team_count - 1)
+    return geometry["length"] * fraction - 0.12 * slot
 
 # === STARTOVNÍ SEMAFOR (po formačním kole) ===
 # Jako ve skutečné F1: 5 červených světel se rozsvěcí po jednom v 1s intervalech,
@@ -338,26 +548,16 @@ SAFETY_CAR_MAX_CATCHUP_TIME = 25.0  # i auto ztracené o celé kolo dožene fron
 SAFETY_CAR_LINEUP_TOLERANCE = 2.0  # největší dovolená mezera od cílové pozice, aby se pole považovalo za seřazené
 
 #Ai si vybíra kola
-def ai_choose_tire(driver, current_weather):
-    """AI si vybírá gumy s velkým vlivem počasí"""
-    if current_weather == "RAIN":
-        if random.random() < 0.95:          # 95% šance na mokré gumy v dešti
-            return "WET" if random.random() < 0.6 else "INTER"
-        else:
-            return "INTER"                  # malá šance na chybu
-
-    elif current_weather == "CLOUD":
-        if random.random() < 0.75:
-            return "INTER"
-        else:
-            return "MEDIUM"
-
-    # Sucho (SUN)
-    else:
-        if random.random() < 0.92:          # velmi malá šance na mokré gumy za sucha
-            return "HARD" if driver.current_lap > 25 else "MEDIUM" if driver.current_lap > 10 else "SOFT"
-        else:
-            return "MEDIUM"                 # výjimečná chyba
+def ai_choose_tire(driver, race):
+    """AI si vybírá gumy podle vlhkosti trati (s osobním weather_bias)."""
+    wetness = race.track_wetness + driver.weather_bias
+    if wetness >= AI_WET_TIRE_WETNESS:
+        return "WET"
+    if wetness >= AI_INTER_WETNESS:
+        return "INTER"
+    if random.random() < 0.92:
+        return "HARD" if driver.current_lap > 25 else "MEDIUM" if driver.current_lap > 10 else "SOFT"
+    return "MEDIUM"                 # výjimečná chyba
 
 class Screen:
     def handle_events(self, events):
@@ -385,7 +585,7 @@ class MenuScreen(Screen):
         global current_screen
         for event in events:
             if event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = pygame.mouse.get_pos()
+                mouse_pos = get_mouse_pos()
                 for btn in self.buttons:
                     if btn["rect"].collidepoint(mouse_pos):
                         if btn["action"] == "QUIT":
@@ -411,7 +611,7 @@ class MenuScreen(Screen):
         subtitle = self.font.render(get_text("2025 SEASON"), True, (180, 180, 210))
         screen.blit(subtitle, subtitle.get_rect(centerx=960, centery=265))
 
-        mouse_pos = pygame.mouse.get_pos()
+        mouse_pos = get_mouse_pos()
         
         for btn in self.buttons:
             hovered = btn["rect"].collidepoint(mouse_pos)
@@ -430,14 +630,14 @@ class MenuScreen(Screen):
             text = self.font.render(get_text(btn["key"]), True, text_color)
             screen.blit(text, text.get_rect(center=btn["rect"].center))
 
-def ai_choose_pace(driver, race_progress, current_weather):
+def ai_choose_pace(driver, race_progress, wetness):
     
     # zničené gumy
     if driver.tire_wear > 0.8:
         return "SAVE"
     
-    # déšť
-    if current_weather == "RAIN":
+    # mokrá trať
+    if wetness > 0.5:
         return "SAVE"
     
     # start závodu
@@ -469,7 +669,7 @@ def ai_plan_stint(driver, race, is_first_stint=True):
 
     # Agrese + počasí
     modifier = driver.strategy_aggression
-    if race.current_weather == "RAIN":
+    if race.track_wetness > 0.3:
         modifier *= 0.7
     if driver.planned_stops == 1:          # 1-stop = delší stinty
         modifier *= 1.25
@@ -486,17 +686,28 @@ def ai_should_pit(driver, race):
     if race.player_team and driver.team_name == race.player_team.name:
         return False
 
-    if driver.in_pit or driver.on_pit_lane:
+    if driver.in_pit or driver.on_pit_lane or driver.pit_requested:
         return False
+
+    # Změna podmínek na trati (déšť / schnutí) se řeší hned, bez ohledu na poslední pit
+    wetness = race.track_wetness + driver.weather_bias
+    wrong_tire = False
+    if driver.tire in DRY_TIRES:
+        wrong_tire = wetness >= AI_INTER_WETNESS
+    elif driver.tire == "INTER":
+        wrong_tire = wetness >= AI_WET_TIRE_WETNESS or (wetness <= AI_INTER_TO_DRY and race.current_weather != "RAIN")
+    elif driver.tire == "WET":
+        wrong_tire = wetness <= AI_WET_TO_INTER
+    if wrong_tire:
+        driver.next_tire = ai_choose_tire(driver, race)
+        return True
+
     if driver.current_lap - driver.last_pit_lap < 6:
         return False
 
     # Základní podmínky
     if driver.tire_wear > 0.88:
-        return True
-    if race.current_weather == "RAIN" and driver.tire not in ["INTER", "WET"]:
-        return True
-    if race.current_weather == "SUN" and driver.tire in ["INTER", "WET"]:
+        driver.next_tire = ai_choose_tire(driver, race)
         return True
 
     # === UNDERCUT / OVERCUT LOGIKA ===
@@ -522,7 +733,7 @@ def ai_should_pit(driver, race):
     if ahead and ahead.current_stint_laps > 4 and driver.current_stint_laps >= 7:
         if min_gap < 8 and random.random() < (0.65 * driver.strategy_aggression):
             print(f"🔥 UNDERCUT! {driver.name} pituje před {ahead.name}")
-            driver.next_tire = ai_choose_tire(driver, race.current_weather)
+            driver.next_tire = ai_choose_tire(driver, race)
             return True
 
     # OVERCUT (zůstanu déle)
@@ -536,7 +747,7 @@ def ai_should_pit(driver, race):
 
     # Normální pit podle plánu
     if driver.current_lap >= driver.target_stint_end:
-        driver.next_tire = ai_choose_tire(driver, race.current_weather)
+        driver.next_tire = ai_choose_tire(driver, race)
         return True
 
     return False
@@ -549,8 +760,13 @@ def generate_incident(driver, race):
 
     roll = random.random()
 
+    # Mokrá trať a špatné gumy (slick v dešti) zvyšují riziko nehody
+    risk = 1.0 + 1.5 * race.track_wetness
+    if tire_grip(driver.tire, race.track_wetness) < 0.8:
+        risk += 2.5
+
     # Velmi nízká šance na jakýkoliv incident
-    if roll < 0.004:          # ~1x za 40–50 sekund při 20x
+    if roll < 0.004 * risk:          # ~1x za 40–50 sekund při 20x
         # Lehká nehoda → Yellow flag
         driver.engine_damage += 0.35
         race.yellow_flag_active = True
@@ -558,7 +774,7 @@ def generate_incident(driver, race):
         driver.incident_cooldown = 10
         return True
 
-    elif roll < 0.007:        # Motor / Crash
+    elif roll < 0.007 * risk:        # Motor / Crash
         driver.is_dnf = True
         driver.dnf_reason = random.choice(["Engine", "Crash", "Big Shunt", "Spin + Wall"])
         driver.finished = True
@@ -605,6 +821,8 @@ class ChampionshipScreen(Screen):
         # Race state
         self.race_time = 0.0
         self.current_weather = "SUN"
+        self.track_wetness = 0.0          # vlhkost trati 0 (sucho) - 1 (úplně mokro)
+        self._weather_overlay = None      # cache průhledné vrstvy přes mapu (mokro/oblačno)
         self.weather_last_check_lap = -1  # poslední kolo (lídra), kdy se losovalo počasí
         self.vsc_active = False
         self.vsc_timer = 0.0
@@ -728,6 +946,8 @@ class ChampionshipScreen(Screen):
             driver.finished = False
             driver.pit_requested = False
             driver.in_pit = False
+            driver.on_pit_lane = False
+            driver.pit_phase = None
             driver.pit_timer = 0.0
             driver.tire_wear = 0.0
             driver.last_pit_lap = -10
@@ -736,6 +956,7 @@ class ChampionshipScreen(Screen):
             driver.total_time = 0.0
             driver.drs_active = False
             driver.strategy_aggression = random.uniform(0.75, 1.35)
+            driver.weather_bias = random.uniform(-0.06, 0.08)
             driver.planned_stops = 2 if random.random() < 0.7 else 1
             driver.is_dnf = False
             driver.dnf_reason = None
@@ -752,6 +973,7 @@ class ChampionshipScreen(Screen):
         self.race_time = 0.0
         self.race_finished = False
         self.current_weather = "SUN"
+        self.track_wetness = 0.0
         self.weather_last_check_lap = -1
         self.safety_car_active = False
         self.safety_car_timer = 0.0
@@ -824,6 +1046,7 @@ class ChampionshipScreen(Screen):
             "championship_round": self.championship_round,
             "race_time": round(self.race_time, 2),
             "current_weather": self.current_weather,
+            "track_wetness": round(self.track_wetness, 3),
             "safety_car_active": self.safety_car_active,
             "safety_car_timer": round(self.safety_car_timer, 2),
             "vsc_active": self.vsc_active,
@@ -908,6 +1131,7 @@ class ChampionshipScreen(Screen):
             self.championship_round = save_data["championship_round"]
             self.race_time = save_data["race_time"]
             self.current_weather = save_data["current_weather"]
+            self.track_wetness = save_data.get("track_wetness", 0.0)
             self.safety_car_active = save_data["safety_car_active"]
             self.safety_car_timer = save_data["safety_car_timer"]
             self.safety_car_index = 0
@@ -1018,13 +1242,19 @@ class ChampionshipScreen(Screen):
                 and leader_lap_for_weather > 0
                 and leader_lap_for_weather % WEATHER_CHANGE_LAPS == 0):
             self.weather_last_check_lap = leader_lap_for_weather
-            roll = random.random()
-            if roll < 0.65: self.current_weather = "SUN"
-            elif roll < 0.88: self.current_weather = "CLOUD"
-            else: self.current_weather = "RAIN"
+            self.current_weather = next_weather(self.current_weather)
+
+        # Vlhkost trati se mění podle "kol" (jedno kolo = path_len / time_compression race-sekund),
+        # takže rychlost mokření/schnutí je stejná na všech tratích i v SHORT/FULL.
+        lap_race_seconds = len(self.current_track["racing_line"]) / max(0.05, getattr(self, 'time_compression', 1.0))
+        if self.current_weather == "RAIN":
+            self.track_wetness += delta_time / (WETTING_LAPS * lap_race_seconds)
+        else:
+            self.track_wetness -= delta_time / (DRYING_LAPS[self.current_weather] * lap_race_seconds)
+        self.track_wetness = max(0.0, min(1.0, self.track_wetness))
 
         # === SAFETY CAR LOGIKA (jako ve skutečné F1) ===
-        if (random.random() < 0.001 and not self.safety_car_active
+        if (random.random() < 0.001 * (1.0 + 1.5 * self.track_wetness) and not self.safety_car_active
                 and self.race_phase == RACE_PHASE_RACING and self.race_time > 25):
             self.deploy_safety_car(20, 55)
             print("🚨 SAFETY CAR OUT - Jezdci se seřazují za ním!")
@@ -1079,14 +1309,12 @@ class ChampionshipScreen(Screen):
                 driver != self.player_team.drivers[1] and
                 driver.ai_decision_timer > 0.9):
 
-                driver.pace_mode = ai_choose_pace(driver, race_progress, self.current_weather)
+                driver.pace_mode = ai_choose_pace(driver, race_progress, self.track_wetness)
                 
                 if ai_should_pit(driver, self):
                     driver.pit_requested = True
                     driver.last_pit_lap = driver.current_lap
                 
-                if driver.in_pit and driver.pit_timer > PIT_TIME - 0.1:
-                    ai_plan_stint(driver, self, is_first_stint=False)
                 
                 driver.ai_decision_timer = 0
 
@@ -1119,26 +1347,12 @@ class ChampionshipScreen(Screen):
             # přesně vzdálenost ujetá tento frame (stejná hodnota, co jde do
             # driver.progress o pár řádků výš).
             lap_fraction = (speed * delta_time) / path_len if path_len else 0.0
-            driver.tire_wear += lap_fraction * PACE[driver.pace_mode]["wear"] * TIRE_WEAR_PER_LAP[driver.tire]
+            driver.tire_wear += (lap_fraction * PACE[driver.pace_mode]["wear"] * TIRE_WEAR_PER_LAP[driver.tire]
+                                 * tire_wear_weather_factor(driver.tire, self.track_wetness))
             driver.tire_wear = min(1.0, driver.tire_wear)
 
-            # Pit stop logika
-            if driver.pit_requested and not driver.in_pit and not driver.on_pit_lane:
-                driver.on_pit_lane = True
-                driver.in_pit = True
-                driver.pit_timer = 0.0
-                driver.pit_requested = False
-
-            if driver.in_pit:
-                driver.pit_timer += delta_time
-                if driver.pit_timer >= PIT_TIME:
-                    driver.in_pit = False
-                    driver.on_pit_lane = False
-                    driver.tire = driver.next_tire
-                    driver.tire_wear = 0.0
-                    driver.last_pit_lap = driver.current_lap
-                    driver.track_index = (driver.track_index + 8) % path_len
-                    driver.progress = 0.3
+            # Pit stop (vjezd do uličky, zastávka u boxu, odjezd)
+            self._update_pit(driver, delta_time, path_len)
 
         # === KONEC ZÁVODU ===
         # Tie-break musí jít přes celou poziční hodnotu, ne jen current_lap - jinak
@@ -1188,6 +1402,46 @@ class ChampionshipScreen(Screen):
 
         if all(d.finished or d.is_dnf for d in self.drivers):
             self.finish_race()
+
+    def _update_pit(self, driver, delta_time, path_len):
+        geometry = get_pit_geometry(self.current_track)
+        d = ((driver.track_index + driver.progress) - geometry["entry"]) % path_len
+
+        if not driver.in_pit:
+            # Žádost o pit se splní, až auto dojede k vjezdu do uličky (ne okamžitě)
+            if driver.pit_requested and self.race_phase == RACE_PHASE_RACING and d < PIT_ENTRY_WINDOW:
+                team_names = list(self.teams)
+                team = self.teams.get(driver.team_name)
+                slot = team.drivers.index(driver) if team and driver in team.drivers else 0
+                driver.pit_box_d = pit_box_distance(
+                    geometry, team_names.index(driver.team_name), len(team_names), slot)
+                driver.in_pit = True
+                driver.on_pit_lane = True
+                driver.pit_phase = "ENTRY"
+                driver.pit_requested = False
+                driver.pit_timer = 0.0
+            return
+
+        if driver.pit_phase == "ENTRY":
+            if d >= driver.pit_box_d:
+                driver.pit_phase = "SERVICE"
+                driver.pit_timer = 0.0
+        elif driver.pit_phase == "SERVICE":
+            driver.pit_timer += delta_time
+            if driver.pit_timer >= PIT_TIME / getattr(self, 'time_compression', 1.0):
+                driver.tire = driver.next_tire
+                driver.tire_wear = 0.0
+                driver.current_stint_laps = 0
+                driver.last_pit_lap = driver.current_lap
+                if driver not in self.player_team.drivers:
+                    ai_plan_stint(driver, self, is_first_stint=False)
+                driver.pit_phase = "EXIT"
+        else:  # EXIT (a pojistka pro nekonzistentní stav)
+            if d >= geometry["length"] or driver.pit_phase is None:
+                driver.in_pit = False
+                driver.on_pit_lane = False
+                driver.pit_phase = None
+                driver.pit_timer = 0.0
 
     def _play_start_comment(self):
         if self.start_audio_played:
@@ -1288,7 +1542,7 @@ class ChampionshipScreen(Screen):
             front_pos = front.current_lap * path_len + front.track_index + front.progress
             driver_pos = driver.current_lap * path_len + driver.track_index + driver.progress
             gap = front_pos - driver_pos
-            if 0 < gap < DRS_GAP_THRESHOLD and self.current_weather != "RAIN" and self.race_time > 5:
+            if 0 < gap < DRS_GAP_THRESHOLD and self.track_wetness < DRS_MAX_WETNESS and self.race_time > 5:
                 driver.drs_active = True
 
     def handle_battles(self):
@@ -1329,7 +1583,7 @@ class ChampionshipScreen(Screen):
 
         for event in events:
             if event.type == pygame.MOUSEBUTTONDOWN:
-                pos = pygame.mouse.get_pos()
+                pos = get_mouse_pos()
 
                 if self.show_ingame_menu:
                     if hasattr(self, 'continue_rect') and self.continue_rect.collidepoint(pos):
@@ -1381,12 +1635,10 @@ class ChampionshipScreen(Screen):
                     if self.show_tire_select and self.tire_select_buttons:
                         for rect, tire_type in self.tire_select_buttons:
                             if rect.collidepoint(pos):
-                                if self.tire_select_for == "driver1":
-                                    self.player_team.drivers[0].next_tire = tire_type
-                                    self.player_team.drivers[0].pit_requested = True
-                                else:
-                                    self.player_team.drivers[1].next_tire = tire_type
-                                    self.player_team.drivers[1].pit_requested = True
+                                chosen = self.player_team.drivers[0 if self.tire_select_for == "driver1" else 1]
+                                if not chosen.in_pit and not chosen.is_dnf and not chosen.finished:
+                                    chosen.next_tire = tire_type
+                                    chosen.pit_requested = True
                                 self.show_tire_select = False
                                 self.tire_select_buttons = []
                                 return
@@ -1457,6 +1709,15 @@ class ChampionshipScreen(Screen):
                 elif event.key == pygame.K_k:           # K = Seznam uložených her
                     self.show_save_list()
 
+    @staticmethod
+    def _pit_button_color(driver):
+        """Tlačítko BOX: červené = klid, žluté = pit požadován (čeká na vjezd), zelené = v boxové uličce."""
+        if driver.in_pit:
+            return (0, 160, 90)
+        if driver.pit_requested:
+            return (225, 165, 0)
+        return (200, 60, 60)
+
     def _draw_start_lights(self, screen):
         """Pětice startovních světel jako na F1 semaforu (2 světla nad sebou v každém sloupci)."""
         radius = 18
@@ -1518,7 +1779,7 @@ class ChampionshipScreen(Screen):
             ]
 
             for rect, text in buttons_list:
-                hovered = rect.collidepoint(pygame.mouse.get_pos())
+                hovered = rect.collidepoint(get_mouse_pos())
                 color = (65, 65, 110) if hovered else (30, 30, 55)
                 pygame.draw.rect(screen, color, rect)
                 pygame.draw.rect(screen, (255, 215, 0), rect, 4)
@@ -1551,7 +1812,9 @@ class ChampionshipScreen(Screen):
 
             screen.blit(self.font_big.render(f"{get_text('Kolo')} {current_lap}/{self.current_track['laps']}", True, (255, 215, 0)), (40, 25))
             screen.blit(self.font.render(f"{get_text('Čas:')} {self.race_time:.1f}s", True, (255, 255, 255)), (40, 68))
-            screen.blit(self.font.render(f"{get_text('Počasí:')} {self.current_weather}", True, (100, 255, 255)), (40, 98))
+            weather_text = (f"{get_text('Počasí:')} {get_text('WEATHER_' + self.current_weather)}   "
+                            f"{get_text('Vlhkost trati:')} {int(self.track_wetness * 100)}%")
+            screen.blit(self.font.render(weather_text, True, (100, 255, 255)), (40, 98))
 
             # Zobrazení fáze závodu
             if self.race_phase == RACE_PHASE_FORMATION:
@@ -1599,11 +1862,11 @@ class ChampionshipScreen(Screen):
 
             # Vlajky
             if self.safety_car_active:
-                screen.blit(self.font.render("🚨 SAFETY CAR", True, (255, 80, 0)), (1250, 30))
+                screen.blit(self.font.render(get_text("FLAG_SC"), True, (255, 80, 0)), (1110, 30))
             elif self.vsc_active:
-                screen.blit(self.font.render("🚧 VSC", True, (255, 200, 0)), (1250, 30))
+                screen.blit(self.font.render(get_text("FLAG_VSC"), True, (255, 200, 0)), (1110, 30))
             elif self.yellow_flag_active:
-                screen.blit(self.font.render("🟡 ŽLUTÁ VLÁJKA", True, (255, 255, 0)), (1250, 30))
+                screen.blit(self.font.render(get_text("FLAG_YELLOW"), True, (255, 255, 0)), (1110, 30))
 
                         # === LEADERBOARD VLEVO ===
             y = 170
@@ -1694,6 +1957,22 @@ class ChampionshipScreen(Screen):
                 scale_y = map_h / self.track_source_height
                 path = self.current_track["racing_line"]
 
+                # Počasí přes mapu: ztmavení podle vlhkosti/oblačnosti + padající déšť
+                dim = int(90 * self.track_wetness) + (25 if self.current_weather == "CLOUD" else 0)
+                if dim > 0:
+                    if self._weather_overlay is None or self._weather_overlay.get_size() != (map_w, map_h):
+                        self._weather_overlay = pygame.Surface((map_w, map_h))
+                        self._weather_overlay.fill((8, 16, 40))
+                    self._weather_overlay.set_alpha(min(dim, 140))
+                    screen.blit(self._weather_overlay, (map_x, map_y))
+                if self.current_weather == "RAIN":
+                    ticks = pygame.time.get_ticks()
+                    for k in range(70):
+                        rx = (k * 97 + ticks * 0.06) % map_w
+                        ry = (k * 53 + ticks * 0.45) % map_h
+                        pygame.draw.line(screen, (150, 170, 225),
+                                         (map_x + rx, map_y + ry), (map_x + rx - 4, map_y + ry + 11), 1)
+
                 # DRS zóny
                 for start, end in self.current_track.get("drs_zones", []):
                     for i in range(start, min(end, len(path)-1)):
@@ -1703,21 +1982,38 @@ class ChampionshipScreen(Screen):
                         y2 = path[i+1][1] * scale_y + map_y
                         pygame.draw.line(screen, (0, 220, 255), (int(x1), int(y1)), (int(x2), int(y2)), 5)
                 
-                # Pit lane
-                if "pit_lane" in self.current_track:
-                    scaled_pit = [(p[0]*scale_x + map_x, p[1]*scale_y + map_y) for p in self.current_track["pit_lane"]]
-                    if len(scaled_pit) > 1:
-                        pygame.draw.lines(screen, (255, 140, 0), False, scaled_pit, 4)
+                # Boxová ulička (odvozená z racing_line) + boxy týmů
+                pit_geom = get_pit_geometry(self.current_track)
+                lane_steps = int(pit_geom["length"] / 0.25)
+                lane_points = []
+                for step in range(lane_steps + 1):
+                    px, py = pit_lane_position(self.current_track, pit_geom,
+                                               pit_geom["entry"] + min(pit_geom["length"], step * 0.25))
+                    lane_points.append((px * scale_x + map_x, py * scale_y + map_y))
+                if len(lane_points) > 1:
+                    pygame.draw.lines(screen, (255, 140, 0), False, lane_points, 3)
+                team_list = list(self.teams.values())
+                for team_i, team_obj in enumerate(team_list):
+                    box_d = pit_box_distance(pit_geom, team_i, len(team_list), 0)
+                    bx, by = pit_lane_position(self.current_track, pit_geom, pit_geom["entry"] + box_d, extra=9)
+                    pygame.draw.rect(screen, team_obj.color,
+                                     (int(bx * scale_x + map_x) - 3, int(by * scale_y + map_y) - 3, 6, 6))
 
                 # Auta na trati
                 for driver in self.drivers:
                     if driver.is_dnf or driver.finished: continue
-                    i = driver.track_index
-                    next_i = (i + 1) % len(path)
-                    x1, y1 = path[i]
-                    x2, y2 = path[next_i]
-                    x = x1 * scale_x + (x2 - x1) * driver.progress * scale_x + map_x
-                    y = y1 * scale_y + (y2 - y1) * driver.progress * scale_y + map_y
+                    if driver.in_pit:
+                        px, py = pit_lane_position(self.current_track, pit_geom,
+                                                   driver.track_index + driver.progress)
+                        x = px * scale_x + map_x
+                        y = py * scale_y + map_y
+                    else:
+                        i = driver.track_index
+                        next_i = (i + 1) % len(path)
+                        x1, y1 = path[i]
+                        x2, y2 = path[next_i]
+                        x = x1 * scale_x + (x2 - x1) * driver.progress * scale_x + map_x
+                        y = y1 * scale_y + (y2 - y1) * driver.progress * scale_y + map_y
 
                     color = self.teams[driver.team_name].color
                     size = 11 if driver == self.selected_driver else 8
@@ -1765,7 +2061,7 @@ class ChampionshipScreen(Screen):
 
             # Tlačítko BOX
             self.pit_button1 = pygame.Rect(780, box_y + 18, 75, 60)
-            pygame.draw.rect(screen, (200, 60, 60), self.pit_button1)
+            pygame.draw.rect(screen, self._pit_button_color(d1), self.pit_button1)
             pygame.draw.rect(screen, (255,255,255), self.pit_button1, 3)
             screen.blit(self.font.render("BOX", True, (255,255,255)), 
                         self.font.render("BOX", True, (255,255,255)).get_rect(center=self.pit_button1.center))
@@ -1784,7 +2080,7 @@ class ChampionshipScreen(Screen):
 
             # Tlačítko BOX
             self.pit_button2 = pygame.Rect(1180, box_y + 18, 75, 60)
-            pygame.draw.rect(screen, (200, 60, 60), self.pit_button2)
+            pygame.draw.rect(screen, self._pit_button_color(d2), self.pit_button2)
             pygame.draw.rect(screen, (255,255,255), self.pit_button2, 3)
             screen.blit(self.font.render("BOX", True, (255,255,255)), 
                         self.font.render("BOX", True, (255,255,255)).get_rect(center=self.pit_button2.center))
@@ -1970,18 +2266,15 @@ class SettingsScreen(Screen):
                         change_screen(GAME_STATE_MENU)
 
             if event.type == pygame.MOUSEBUTTONDOWN:
-                pos = pygame.mouse.get_pos()
+                pos = get_mouse_pos()
 
                 if self.fullscreen_rect and self.fullscreen_rect.collidepoint(pos):
-                    IS_FULLSCREEN = not IS_FULLSCREEN
-                    flags = pygame.FULLSCREEN if IS_FULLSCREEN else 0
-                    pygame.display.set_mode((WIDTH, HEIGHT), flags)
+                    toggle_fullscreen()
 
                 for i, btn in enumerate(self.fps_buttons):
                     if btn.collidepoint(pos):
                         self.current_fps_index = i
                         CURRENT_FPS = self.fps_options[i]
-                        clock.tick(CURRENT_FPS)
 
                 for i, rect in enumerate(self.race_mode_buttons):
                     if rect.collidepoint(pos):
@@ -2096,7 +2389,7 @@ change_screen(GAME_STATE_MENU)
 
 # vykreslovaci smycka / main loop
 while True:
-    delta_time = clock.tick(FPS) / 1000
+    delta_time = clock.tick(CURRENT_FPS) / 1000
     events = pygame.event.get()
     
     # kontrola vypnutí hry
@@ -2104,6 +2397,8 @@ while True:
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+            toggle_fullscreen()   # F11 = celá obrazovka / okno
     
     current_screen.handle_events(events)
     current_screen.update(delta_time)
@@ -2112,4 +2407,4 @@ while True:
 
     current_screen.draw(screen)
 
-    pygame.display.flip()
+    present_frame()
