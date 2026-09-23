@@ -101,6 +101,40 @@ pořadí na trati** – ne `driver.distance`, který se nastavuje jen v `__init_
 a nikde jinde needituje (mrtvý atribut, používá ho ale `update_drs()` pro DRS gap –
 tzn. DRS gap výpočet je aktuálně nefunkční/vždy stejný, protože `distance` se nemění).
 
+## Souboje o pozici (`handle_battles`) – šance přepočtená na reálnou sekundu
+Uživatel: "jak ty auta jezdí, přijde mi to hektické". Příčina: `attack_chance` byla
+konstanta NA SNÍMEK (`0.065 * overtake_skill`, s DRS `*2.4`), vyhodnocovaná v `update()`
+každý reálný frame bez ohledu na FPS (Nastavení nabízí 30-240) nebo `time_scale`
+(1/2/4/20x). Při 60 FPS to dávalo ~98% šanci na "předjetí" (okamžitý teleport pozice)
+do JEDNÉ SEKUNDY od chvíle, co se dvě auta dostala do gapu < 2,2 bodu - a bez cooldownu
+mohla stejná dvojice hned zase přehazovat pozice tam a zpátky. Čím vyšší FPS/time_scale
+uživatel zvolil, tím častěji se `handle_battles()` volalo za stejný race-čas → tím
+"hektičtější" to bylo (viz i jinde v kódu opakovaný vzorec: cokoliv frame-rate-závislého
+= bug, srov. tire wear/weather, které jsou naopak správně škálované na `delta_time`).
+
+Oprava (`OVERTAKE_RATE_PER_SEC`, `OVERTAKE_COOLDOWN`, `Driver.battle_cooldown`):
+- `handle_battles(self, delta_time)` teď dostává `delta_time` (volá se
+  `self.handle_battles(delta_time)` z `update()`, stejná hodnota jako pro pohyb aut - už
+  po vynásobení `time_scale`).
+- `OVERTAKE_RATE_PER_SEC = 0.22` je pravděpodobnost ÚSPĚCHU ZA REÁLNOU RACE-SEKUNDU (ne za
+  frame), škálovaná stejně jako dřív `* overtake_skill` (0,8-1,2) a při DRS `* 2.4`.
+  Převod na pravděpodobnost PRO TENTO KONKRÉTNÍ FRAME je `1 - (1 - rate_per_sec) **
+  delta_time` (složené úročení, ne lineární `rate*delta_time` - správně funguje i při
+  velkém `delta_time`, např. `time_scale=20`, kde by lineární aproximace mohla přestřelit
+  přes 1.0). Výsledek: frekvence předjíždění je teď stejná bez ohledu na FPS/time_scale
+  (ověřeno headless testem - kontrolovaná dvojice aut v gapu 1.0 dala prakticky identický
+  počet předjetí za 20 race-sekund při 30/60/144/240 FPS i při `time_scale` 1-20).
+- Po ÚSPĚŠNÉM předjetí dostanou OBA jezdci `battle_cooldown = OVERTAKE_COOLDOWN` (3 s),
+  který se každý frame odečítá o `delta_time`; dokud je kladný, pár se vůbec nevyhodnocuje.
+  Zabraňuje to okamžitému "vrácení" pozice v příštím framu (typický zdroj blikání).
+  Neúspěšný pokus cooldown nedostává - u správně škálované pravděpodobnosti to není
+  potřeba (na rozdíl od staré verze, kde by to bylo nutné, aby to vůbec šlo zkrotit).
+- Práh gapu (2,2 bodu racing_line) a podmínka `behind_speed > front_speed * 0.94`
+  zůstaly beze změny - o TOM, jestli je souboj vůbec kandidátem, se nic neměnilo, jen o
+  tom, jak ČASTO a jak NEZÁVISLE NA FPS se vyhodnocuje.
+- Ladění: `OVERTAKE_RATE_PER_SEC` výš = agresivnější/rychlejší předjíždění, níž = klidnější
+  pole. `OVERTAKE_COOLDOWN` výš = souboje se táhnou déle (méně "yo-yo" efektu).
+
 ## Safety Car – opraveno (seřazování do vláčku funguje)
 Stav: `safety_car_active`, `safety_car_timer`, `safety_car_index`, `safety_car_progress`,
 `safety_car_laps` (kumulativní počet průjezdů SC, aby šla pozice SC srovnávat s pozicí
@@ -150,10 +184,13 @@ skutečné F1.
 
 Implementace (`Driver.grid_position`, `Driver.formation_start_delay`, konstanty
 `FORMATION_SPEED_KMH`, `TRACK_LENGTH_KM` a `FORMATION_GRID_GAP` u `get_speed()`):
-- V `_load_race()` se po resetu jezdců projde `self.drivers` v aktuálním pořadí
-  (= pořadí, v jakém se zobrazují na startu leaderboardu) a každému se přiřadí
-  `grid_position = i` a `formation_start_delay = i * FORMATION_GRID_GAP` (v sekundách
-  `race_time`).
+- V `_load_race()` se po resetu jezdců vytvoří kopie `self.drivers`, ta se
+  **náhodně zamíchá** (`random.shuffle` - DOČASNÉ řešení, dokud nebude kvalifikace, viz
+  TODO) a v tomhle pořadí se přiřadí `grid_position = i` a `formation_start_delay =
+  i * FORMATION_GRID_GAP` (v sekundách `race_time`). `self.drivers` samotné se
+  nepřehazuje - nic jiného v kódu se jeho pořadím neřídí, o roštu rozhoduje jen
+  `grid_position`/`formation_start_delay`. Až bude kvalifikace, stačí tu nahradit
+  `random.shuffle` výsledkem kvalifikace (seřadit `grid_order` podle kvalifikačního času).
 - `get_speed()` má na začátku větev pro `race.race_phase == RACE_PHASE_FORMATION`:
   dokud `race.race_time < driver.formation_start_delay`, auto stojí (rychlost 0);
   jakmile přijde na řadu, jede pevnou rychlostí dopočítanou z
@@ -198,6 +235,28 @@ Implementace (`Driver.grid_position`, `Driver.formation_start_delay`, konstanty
   Pořadí zůstává zachované nezávisle na těchto hodnotách (matematická vlastnost
   návrhu - uniformní rychlost + odstupňované starty), takže jde dál ladit beze strachu
   z rozbití - stačí měnit `FORMATION_SPEED_KMH`/`FORMATION_GRID_GAP`.
+- **Dva jemné bugy odhalené až po zavedení náhodného roštu** (dokud `self.drivers` pořadí
+  == pořadí na roštu, byly neviditelné - teď už na sobě nezávisí, viz "Startovní rošt"):
+  1. `get_speed()` u FORMATION dřív binárně přepínala 0/plné tempo podle toho, jestli
+     `race.race_time` (konec framu) přesáhl `formation_start_delay` - při vyšším `time_scale`
+     (kdy 1 frame > `FORMATION_GRID_GAP` 0,5 s) se tak víc aut se sousedními starty
+     "odemklo" ve stejném framu a dostala identickou pozici (nedeterministické pořadí mezi
+     nimi navždy poté). Oprava: `get_speed(driver, race, delta_time)` teď počítá `active_dt`
+     - přesně tu část framu, po kterou auto už mělo jet (lineární interpolace mezi
+     předchozím a aktuálním `race.race_time`), takže i menší časový náskok než jeden frame
+     se projeví jako menší (ne nulový/plný) posun. Volání mimo hlavní smyčku
+     (`handle_battles`) `delta_time` nepředávají - tam formace stejně nikdy neběží.
+  2. Přechod `RACE_PHASE_FORMATION -> RACE_PHASE_START` (lídr dojel kolo 1) se dřív
+     vyhodnocoval uvnitř cyklu `for driver in self.drivers`, u KTERÉHOKOLIV jezdce, kdo
+     zrovna dojel svoje kolo - u lídra to vyjde chronologicky první, ale když byl lídr ve
+     `self.drivers` zpracovaný uprostřed seznamu, auta zpracovaná před ním v tomtéž framu
+     ještě dostala celý frame formačního tempa navíc, zatímco auta po něm už žádný (fáze
+     už byla START) - u dvou sousedních aut na roštu to v posledním framu formace uměle
+     otočilo pořadí. Oprava: dokud `race_phase == RACE_PHASE_FORMATION`, cyklus jede v
+     pořadí `sorted(self.drivers, key=lambda d: d.grid_position)` (lídr vždy zpracovaný
+     první), mimo formaci beze změny (`self.drivers` napřímo, kvůli výkonu).
+  Ověřeno headless testem na všech 24 tratích, SHORT i FULL, `time_scale` 1/2/4/20: 0 porušení
+  pořadí (dřív při náhodném roštu a `time_scale=20` běžně několik desítek za závod).
 
 ## Startovní semafor (po formačním kole)
 Race phases jsou `FORMATION` → `START` → `RACING`. Fáze `START` je startovní semafor:
@@ -457,6 +516,8 @@ auto-save po závodě, in-game menu (ESC), Settings (FPS, Race Length, Language)
 
 ## TODO priority
 **Vysoká:** žádná otevřená (viz opravy výše).
+**Plánováno uživatelem:** kvalifikace - až bude hotová, nahradí `random.shuffle` startovního
+roštu (viz "Formační kolo") a bude rozhodovat o `grid_position`/`formation_start_delay`.
 **Střední:** doplnit chybějící překlady hardcoded textů (např. "ULOŽENÉ HRY"); pit stopy: double-stack (oba jezdci týmu se dvěma auty v boxu naráz
 nečekají na sebe), v uličce se nekontroluje kolize aut; počasí: bez předpovědi.
 **Střední (k ověření s uživatelem):** `load_game()` obnoví jezdce (kola, pozice, gumy...) a hned

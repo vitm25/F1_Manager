@@ -555,6 +555,8 @@ class Driver: # jezdec
         self.dnf_reason = None              # "Engine", "Fuel", "Crash", "Spin"
         self.incident_cooldown = 0
 
+        self.battle_cooldown = 0.0   # po úspěšném předjetí chvíli nechá nově předjetého na pokoji (viz handle_battles)
+
 def racing_speed(driver, race):
     """Rychlost auta při normálním závodním tempu (bez SC, boxů a DRS): základ auta,
     opotřebení, tempo směsi a přilnavost gum na aktuální vlhkosti trati."""
@@ -565,8 +567,11 @@ def racing_speed(driver, race):
     return speed
 
 
-def get_speed(driver, race):
-    """Vrátí rychlost jezdce s ohledem na Safety Car a formační kolo"""
+def get_speed(driver, race, delta_time=None):
+    """Vrátí rychlost jezdce s ohledem na Safety Car a formační kolo.
+
+    `delta_time` (volitelné) je délka právě zpracovávaného framu (PO time_scale) - používá
+    ho jen formační kolo, viz níže."""
     if race.safety_car_active and not driver.in_pit:
         # Auta mimo pit jedou pod SC rychlostí danou frontou za safety carem
         # (viz ChampionshipScreen.update_safety_car_queue / get_safety_car_speed).
@@ -584,8 +589,6 @@ def get_speed(driver, race):
     if race.race_phase == RACE_PHASE_FORMATION and not driver.in_pit:
         # Formační kolo: auto se rozjede až ve svém pořadí na roštu a jede
         # stejnou pevnou rychlostí jako ostatní - pořadí se tak nikdy nezamíchá.
-        if race.race_time < driver.formation_start_delay:
-            return 0.0
         # Rychlost se dopočítává tak, aby CELÉ formační kolo trvalo tolik, kolik
         # trvá na reálném okruhu (formation_lap_duration - z reálné délky okruhu).
         # Počet bodů v racing_line je jen "rozlišení" ručního vykreslení tratě a
@@ -596,7 +599,23 @@ def get_speed(driver, race):
         # znamenalo, že SHORT/FULL mód mění i délku formačního kola. Formační kolo
         # má trvat vždy stejně dlouho v reálném čase bez ohledu na zvolený režim
         # závodu, proto se tu dělení time_compression předem "vyruší".
-        return pace / getattr(race, 'time_compression', 1.0)
+        pace /= getattr(race, 'time_compression', 1.0)
+
+        if delta_time is None or delta_time <= 0:
+            # Volání mimo hlavní smyčku (handle_battles apod.) - formace tam navíc
+            # vůbec neběží (gatováno na RACE_PHASE_RACING), takže na přesném zlomku
+            # framu nezáleží; binární přepínač stačí.
+            return 0.0 if race.race_time < driver.formation_start_delay else pace
+
+        # Frakce TOHOTO framu, po kterou už auto mělo být v pohybu. Bez tohohle by při
+        # vyšším time_scale (kdy jeden frame trvá déle než FORMATION_GRID_GAP mezi
+        # sousedními starty) dostala víc aut najednou "celý frame" rychlosti ve
+        # stejném snímku a jejich pozice by se srovnaly na identickou hodnotu -
+        # jednou vyrovnaná auta by pak zůstala navždy vedle sebe (nedeterministické
+        # pořadí) místo aby si udržela odstup daný roštem.
+        prev_race_time = race.race_time - delta_time
+        active_dt = min(delta_time, max(0.0, race.race_time - max(driver.formation_start_delay, prev_race_time)))
+        return pace * (active_dt / delta_time)
 
     speed = racing_speed(driver, race)
 
@@ -732,6 +751,13 @@ START_LIGHTS_OUT_DISPLAY = 1.5  # s, po které zůstane na obrazovce nápis "sv�
 # světel se proto souboje o pozice na chvíli (race_time sekundy) vypnou - pole se nejdřív
 # přirozeně roztáhne, jako v první zatáčce.
 START_NO_BATTLE_SECONDS = 8.0
+
+# === SOUBOJE O POZICI (handle_battles) ===
+# Pravděpodobnost ZA REÁLNOU SEKUNDU, ne za snímek (viz komentář u handle_battles) - dřív to
+# byla konstanta na snímek, takže souboj byl skoro jistý hned v první desetině sekundy a pole
+# na mapě neustále "blikalo" (uživatel: "jak ty auta jezdí, přijde mi to hektické").
+OVERTAKE_RATE_PER_SEC = 0.22       # NEUTRAL tempo; * overtake_skill (0.8-1.2), DRS *2.4
+OVERTAKE_COOLDOWN = 3.0            # s klidu pro oba jezdce po vyřešeném souboji (win i loss)
 
 SAFETY_CAR_DURATION = 8.0
 VSC_DURATION = 6.0
@@ -1184,12 +1210,16 @@ class ChampionshipScreen(Screen):
             driver.is_dnf = False
             driver.dnf_reason = None
             driver.incident_cooldown = 0
+            driver.battle_cooldown = 0.0
 
             ai_plan_stint(driver, self, True)
 
-        # Startovní rošt - pořadí odpovídá aktuálnímu pořadí v self.drivers
-        # (stejné, v jakém se zobrazuje na startu leaderboardu).
-        for grid_i, driver in enumerate(self.drivers):
+        # Startovní rošt - DOČASNĚ náhodný (dokud nebude kvalifikace, viz TODO v CLAUDE.md).
+        # self.drivers samotné se nepřehazuje (jinde se neřídí pořadím), jen grid_position a
+        # formation_start_delay - o tom, kdo je na roštu kde, rozhoduje jedině tohle.
+        grid_order = list(self.drivers)
+        random.shuffle(grid_order)
+        for grid_i, driver in enumerate(grid_order):
             driver.grid_position = grid_i
             driver.formation_start_delay = grid_i * FORMATION_GRID_GAP
 
@@ -1536,7 +1566,17 @@ class ChampionshipScreen(Screen):
 
         race_progress = max((d.current_lap for d in self.drivers if not d.finished), default=0) / self.current_track["laps"]
 
-        for driver in self.drivers:
+        # Během formačního kola se musí projíždět PŘESNĚ v pořadí roštu (lídr první) - lídr
+        # jako jediný může tento frame dokončit kolo 1 a přepnout race_phase na START (viz
+        # níže). Kdyby se zpracovávalo v libovolném pořadí self.drivers a lídr byl zpracovaný
+        # až uprostřed, auta zpracovaná PŘED ním by ještě dostala celý frame formačního tempa,
+        # zatímco auta PO něm by v tom samém framu už viděla START a nedostala by nic -
+        # nekonzistentní "poslední frame" uměle přehodil pořadí dvou sousedních aut na roštu.
+        # Zpracováním v pořadí roštu dostanou všichni za lídrem stejné (žádné) zacházení.
+        driver_order = (sorted(self.drivers, key=lambda d: d.grid_position)
+                        if self.race_phase == RACE_PHASE_FORMATION else self.drivers)
+
+        for driver in driver_order:
             if driver.finished or driver.is_dnf:
                 continue
 
@@ -1561,7 +1601,7 @@ class ChampionshipScreen(Screen):
                 driver.ai_decision_timer = 0
 
             # === ZÍSKÁNÍ RYCHLOSTI (včetně SC) ===
-            speed = get_speed(driver, self)
+            speed = get_speed(driver, self, delta_time)
             
             # === TIME COMPRESSION (rozdíl mezi SHORT a FULL) ===
             speed *= getattr(self, 'time_compression', 1.0)
@@ -1640,7 +1680,7 @@ class ChampionshipScreen(Screen):
                 self._play_start_comment()
 
         self.update_drs()
-        self.handle_battles()
+        self.handle_battles(delta_time)
 
         if all(d.finished or d.is_dnf for d in self.drivers):
             self.finish_race()
@@ -2100,7 +2140,15 @@ class ChampionshipScreen(Screen):
             if 0 < gap < DRS_GAP_THRESHOLD and self.track_wetness < DRS_MAX_WETNESS and self.race_time > 5:
                 driver.drs_active = True
 
-    def handle_battles(self):
+    def handle_battles(self, delta_time):
+        """Souboje o pozici. Šance na úspěšné předjetí je zadaná jako pravděpodobnost ZA
+        REÁLNOU SEKUNDU (OVERTAKE_RATE_PER_SEC), ne za snímek - jinak by při vyšším FPS
+        (Nastavení nabízí až 240) nebo časové kompresi (SHORT/time_scale) souboj proběhl
+        prakticky okamžitě (desítky vyhodnocení za sekundu při konstantní šanci na každé)
+        a pole by na mapě neustále "blikalo" místo aby souboj vypadal jako reálný přejezd
+        přes pár zatáček. Po ÚSPĚŠNÉM předjetí navíc oba jezdci dostanou `battle_cooldown`,
+        aby stejná dvojice hned zase nezačala přehazovat pozice tam a zpátky (neúspěšný pokus
+        cooldown nedává - při správně škálované pravděpodobnosti to není potřeba)."""
         if not self.current_track or self.safety_car_active or self.race_phase != RACE_PHASE_RACING:
             return  # Žádné předjíždění během Safety Caru ani před startem (formační kolo, semafor)
         if self.race_time - self.race_start_time < START_NO_BATTLE_SECONDS:
@@ -2110,27 +2158,34 @@ class ChampionshipScreen(Screen):
         # Vyřadit dojeté/DNF/pitující jezdce - jinak šlo "předjet" i zaparkované
         # auto po nehodě nebo si spočítat souboj s autem v boxové uličce.
         active = [d for d in self.drivers if not d.finished and not d.is_dnf and not d.in_pit]
+        for d in active:
+            d.battle_cooldown = max(0.0, d.battle_cooldown - delta_time)
         ordered = sorted(active, key=lambda d: d.current_lap * path_len + d.track_index + d.progress, reverse=True)
 
         for i in range(len(ordered) - 1):
             front = ordered[i]
             behind = ordered[i + 1]
-            
+            if front.battle_cooldown > 0 or behind.battle_cooldown > 0:
+                continue
+
             front_pos = front.current_lap * path_len + front.track_index + front.progress
             behind_pos = behind.current_lap * path_len + behind.track_index + behind.progress
             gap = front_pos - behind_pos
-            
+
             if 0 < gap < 2.2:
                 front_speed = get_speed(front, self)
                 behind_speed = get_speed(behind, self)
-                
-                attack_chance = 0.065 * behind.overtake_skill
+
+                rate_per_sec = OVERTAKE_RATE_PER_SEC * behind.overtake_skill
                 if behind.drs_active:
-                    attack_chance *= 2.4
-                
+                    rate_per_sec *= 2.4
+                attack_chance = 1.0 - (1.0 - min(rate_per_sec, 0.999)) ** max(0.0, delta_time)
+
                 if behind_speed > front_speed * 0.94 and random.random() < attack_chance:
                     behind.track_index = front.track_index
                     behind.progress = min(front.progress + 0.15, 0.96)
+                    behind.battle_cooldown = OVERTAKE_COOLDOWN
+                    front.battle_cooldown = OVERTAKE_COOLDOWN
                     print(f"⚡ {behind.name} předjel {front.name}")
 
     def handle_events(self, events):
