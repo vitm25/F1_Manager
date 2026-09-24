@@ -190,6 +190,7 @@ TEXTS = {
     "FULL RACE (1h30+)": {"CS": "FULL RACE (1h30+)", "EN": "FULL RACE (1h30+)", "IT": "GARA COMPLETA (1H30+)"},
     "JAZYK": {"CS": "JAZYK", "EN": "LANGUAGE", "IT": "LINGUA"},
     "FRAMERATE (FPS)": {"CS": "FRAMERATE (FPS)", "EN": "FRAMERATE (FPS)", "IT": "FREQUENZA DEI FRAME"},
+    "ESC BACK": {"CS": "ESC = zpět", "EN": "ESC = back", "IT": "ESC = indietro"},
 }
 
 def audio_problem_hint(path):
@@ -849,6 +850,55 @@ class MenuScreen(Screen):
             {"key": "VYPNOUT",      "rect": pygame.Rect(800, 580, 320, 65), "action": "QUIT"}
         ]
 
+        # Pozadí: silueta náhodné tratě, po které jezdí tečky v barvách týmů
+        self.menu_track = random.choice(tracks)
+        self.track_points = self._fit_track_points(self.menu_track["racing_line"])
+        self.background = self._build_background()
+        n = len(self.track_points)
+        self.menu_cars = [{"pos": random.uniform(0, n), "speed": random.uniform(1.4, 2.0), "color": team["color"]}
+                          for team in TEAMS.values()]
+
+    @staticmethod
+    def _fit_track_points(racing_line):
+        """Body racing_line roztažené do plochy pod nadpisem (se stejným poměrem stran jako mapa v závodě)."""
+        pts = [(x * 0.72, y * 0.44) for x, y in racing_line]
+        min_x, max_x = min(p[0] for p in pts), max(p[0] for p in pts)
+        min_y, max_y = min(p[1] for p in pts), max(p[1] for p in pts)
+        box = pygame.Rect(160, 310, 1600, 740)
+        scale = min(box.w / max(1.0, max_x - min_x), box.h / max(1.0, max_y - min_y))
+        off_x = box.centerx - (min_x + max_x) / 2 * scale
+        off_y = box.centery - (min_y + max_y) / 2 * scale
+        return [(x * scale + off_x, y * scale + off_y) for x, y in pts]
+
+    def _build_background(self):
+        bg = pygame.Surface((WIDTH, HEIGHT)).convert()
+        for i in range(HEIGHT):
+            intensity = int(28 * (1 - i / HEIGHT))
+            pygame.draw.line(bg, (intensity + 8, max(0, intensity - 18), intensity + 12), (0, i), (WIDTH, i))
+
+        # Asfalt tratě (kolečka v bodech zakulatí spoje silných čar) + tenká středová čára
+        pts = self.track_points
+        for p in pts:
+            pygame.draw.circle(bg, (34, 30, 52), (int(p[0]), int(p[1])), 20)
+        pygame.draw.lines(bg, (34, 30, 52), True, pts, 40)
+        pygame.draw.lines(bg, (70, 62, 105), True, pts, 3)
+        # Cílová čára
+        (x1, y1), (x2, y2) = pts[0], pts[1]
+        norm = math.hypot(x2 - x1, y2 - y1) or 1.0
+        nx, ny = -(y2 - y1) / norm * 20, (x2 - x1) / norm * 20
+        pygame.draw.line(bg, (200, 200, 215), (x1 - nx, y1 - ny), (x1 + nx, y1 + ny), 5)
+
+        label = pygame.font.SysFont("arial", 24).render(self.menu_track["name"].upper(), True, (90, 85, 125))
+        bg.blit(label, label.get_rect(bottomright=(WIDTH - 30, HEIGHT - 20)))
+
+        pygame.draw.rect(bg, (35, 0, 25), (0, 0, WIDTH, 280))
+        return bg
+
+    def update(self, delta_time):
+        n = len(self.track_points)
+        for car in self.menu_cars:
+            car["pos"] = (car["pos"] + car["speed"] * delta_time) % n
+
     def handle_events(self, events):
         global current_screen
         for event in events:
@@ -863,15 +913,17 @@ class MenuScreen(Screen):
                             change_screen(btn["action"])
 
     def draw(self, screen):
-        screen.fill((7, 7, 17))
+        screen.blit(self.background, (0, 0))
 
-        # Gradient
-        for i in range(HEIGHT):
-            intensity = int(28 * (1 - i / HEIGHT))
-            color = (intensity + 8, max(0, intensity - 18), intensity + 12)
-            pygame.draw.line(screen, color, (0, i), (WIDTH, i))
-
-        pygame.draw.rect(screen, (35, 0, 25), (0, 0, WIDTH, 280))
+        pts = self.track_points
+        n = len(pts)
+        for car in self.menu_cars:
+            i = int(car["pos"])
+            frac = car["pos"] - i
+            (x1, y1), (x2, y2) = pts[i], pts[(i + 1) % n]
+            pos = (int(x1 + (x2 - x1) * frac), int(y1 + (y2 - y1) * frac))
+            pygame.draw.circle(screen, (15, 15, 25), pos, 12)
+            pygame.draw.circle(screen, car["color"], pos, 9)
 
         title = self.font_big.render(get_text("F1 MANAGER"), True, (255, 215, 0))
         screen.blit(title, title.get_rect(centerx=960, centery=205))
@@ -2567,6 +2619,43 @@ class ChampionshipScreen(Screen):
                 else:
                     pygame.draw.circle(screen, (48, 14, 14), (cx, cy), radius)
 
+    # Panely závodní obrazovky (x, y, šířka, výška): leaderboard, mapa, ovládání + boxy jezdců, pořadí
+    RACE_PANELS = [(16, 12, 454, 932), (470, 100, 740, 460), (470, 566, 800, 192), (1398, 12, 506, 948)]
+
+    def _race_panels_background(self):
+        """Pozadí závodu s panely orámovanými barvou hráčova týmu - kreslí se jen jednou na tým."""
+        color = self.player_team.color
+        cache = getattr(self, "_panels_cache", None)
+        if cache and cache[0] == color:
+            return cache[1]
+        bg = pygame.Surface((WIDTH, HEIGHT)).convert()
+        bg.fill((12, 12, 22))
+        for rect in self.RACE_PANELS:
+            pygame.draw.rect(bg, (20, 20, 33), rect, border_radius=10)
+            pygame.draw.rect(bg, color, rect, 2, border_radius=10)
+        self._panels_cache = (color, bg)
+        return bg
+
+    def _draw_flag_border(self, screen):
+        """Pulzující žlutý okraj obrazovky při Safety Caru, VSC nebo žluté vlajce."""
+        if self.safety_car_active or self.vsc_active:
+            color = (255, 185, 0)
+        elif self.yellow_flag_active:
+            color = (255, 240, 0)
+        else:
+            return
+        borders = getattr(self, "_flag_borders", None)
+        if borders is None:
+            borders = self._flag_borders = {}
+        if color not in borders:
+            surf = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            for k, alpha in enumerate((255, 170, 110, 60, 25)):   # ostrý okraj + záře dovnitř
+                pygame.draw.rect(surf, (*color, alpha), (k * 5, k * 5, WIDTH - k * 10, HEIGHT - k * 10), 5)
+            borders[color] = surf
+        pulse = 0.5 + 0.5 * math.sin(pygame.time.get_ticks() / 260)
+        borders[color].set_alpha(int(80 + 175 * pulse))
+        screen.blit(borders[color], (0, 0))
+
     def draw(self, screen):
         # F1 carbon dark background
         screen.fill((12, 12, 22))
@@ -2632,6 +2721,8 @@ class ChampionshipScreen(Screen):
             if self.race_finished:
                 self._draw_results_screen(screen)
                 return
+
+            screen.blit(self._race_panels_background(), (0, 0))
 
             # Horní informace - F1 styl
             current_lap = min(max((d.current_lap for d in self.drivers), default=0), self.current_track["laps"])
@@ -2701,7 +2792,7 @@ class ChampionshipScreen(Screen):
                                 + ordered[0].track_index + ordered[0].progress) if ordered else 0
 
             for i, driver in enumerate(ordered[:20]):
-                rect = pygame.Rect(30, y, 460, 34)
+                rect = pygame.Rect(26, y, 438, 34)
                 self.driver_rects.append((rect, driver))
                 if driver == self.selected_driver:
                     pygame.draw.rect(screen, (70, 70, 100), rect)
@@ -2734,8 +2825,7 @@ class ChampionshipScreen(Screen):
             map_x, map_y = 480, 110
             map_w, map_h = 720, 440
             if self.track_image:
-                scaled = pygame.transform.scale(self.track_image, (map_w, map_h))
-                screen.blit(scaled, (map_x, map_y))
+                screen.blit(self.track_image, (map_x, map_y))   # už zmenšená na 720x440 v _load_race
 
                 scale_x = map_w / self.track_source_width
                 scale_y = map_h / self.track_source_height
@@ -2934,6 +3024,8 @@ class ChampionshipScreen(Screen):
                 screen.blit(txt, (right_x - 240, y))
                 y += 26
 
+            self._draw_flag_border(screen)
+
             # Panel pit stopu (BOX) - přes celou obrazovku, závod je při něm pozastavený
             if self.pit_panel_open:
                 self._draw_pit_panel(screen)
@@ -2983,7 +3075,41 @@ class PracticeScreen(Screen):
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     change_screen(GAME_STATE_MENU)
-# nastavení        
+_carbon_background = None
+
+
+def get_carbon_background():
+    """Karbonový vzor (tkanina 2x2, každá buňka s odleskem jiným směrem) + ztmavení k okrajům.
+    Kreslí se jen jednou, pak se používá hotový povrch."""
+    global _carbon_background
+    if _carbon_background is not None:
+        return _carbon_background
+    cell = 9
+    tile = pygame.Surface((cell * 2, cell * 2)).convert()
+    light, dark = (30, 30, 40), (17, 17, 24)
+    for cx in range(2):
+        for cy in range(2):
+            x, y = cx * cell, cy * cell
+            if (cx + cy) % 2 == 0:   # vodorovné vlákno: světlá horní polovina
+                pygame.draw.rect(tile, light, (x, y, cell, cell // 2))
+                pygame.draw.rect(tile, dark, (x, y + cell // 2, cell, cell - cell // 2))
+            else:                    # svislé vlákno: světlá levá polovina
+                pygame.draw.rect(tile, light, (x, y, cell // 2, cell))
+                pygame.draw.rect(tile, dark, (x + cell // 2, y, cell - cell // 2, cell))
+    bg = pygame.Surface((WIDTH, HEIGHT)).convert()
+    for x in range(0, WIDTH, tile.get_width()):
+        for y in range(0, HEIGHT, tile.get_height()):
+            bg.blit(tile, (x, y))
+    shade = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    for y in range(HEIGHT):
+        edge = abs(y - HEIGHT / 2) / (HEIGHT / 2)     # 0 uprostřed, 1 nahoře/dole
+        pygame.draw.line(shade, (5, 5, 10, int(60 + 150 * edge ** 2)), (0, y), (WIDTH, y))
+    bg.blit(shade, (0, 0))
+    _carbon_background = bg
+    return bg
+
+
+# nastavení
 class SettingsScreen(Screen):
     def __init__(self):
         self.font = pygame.font.SysFont("arial", 28)
@@ -3073,101 +3199,94 @@ class SettingsScreen(Screen):
                 if isinstance(current_screen, MenuScreen) or isinstance(current_screen, ChampionshipScreen):
                     pass  # při příštím draw se použije nový jazyk
 
+    def _card(self, screen, rect, title, accent=(255, 215, 0)):
+        """Karta jedné sekce nastavení: poloprůhledný panel, barevný proužek vlevo a nadpis."""
+        panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(panel, (14, 14, 24, 225), panel.get_rect(), border_radius=14)
+        screen.blit(panel, rect.topleft)
+        pygame.draw.rect(screen, (75, 75, 100), rect, 2, border_radius=14)
+        pygame.draw.rect(screen, accent, (rect.x + 2, rect.y + 16, 5, rect.h - 32), border_radius=3)
+        screen.blit(self.font.render(title, True, accent), (rect.x + 24, rect.y + 14))
+
+    def _button(self, screen, rect, text, selected, on_color=(255, 215, 0)):
+        pygame.draw.rect(screen, on_color if selected else (40, 40, 60), rect, border_radius=8)
+        pygame.draw.rect(screen, (255, 255, 255), rect, 4 if selected else 2, border_radius=8)
+        txt = self.font.render(text, True, (20, 20, 30) if selected else (255, 255, 255))
+        screen.blit(txt, txt.get_rect(center=rect.center))
+
     def draw(self, screen):
-        screen.fill((12, 12, 25))
+        screen.blit(get_carbon_background(), (0, 0))
 
         title = self.font_big.render(get_text("NASTAVENÍ"), True, (255, 215, 0))
-        screen.blit(title, title.get_rect(centerx=960, centery=120))
+        screen.blit(title, title.get_rect(centerx=960, centery=110))
+
+        # Mřížka karet 2 x 3: levý sloupec x=240, pravý x=980, šířka 700
+        left, right, card_w = 240, 980, 700
 
         # FPS
-        fps_title = self.font.render(get_text("FRAMERATE (FPS)"), True, (200, 200, 220))
-        screen.blit(fps_title, (580, 200))
+        card = pygame.Rect(left, 180, card_w, 150)
+        self._card(screen, card, get_text("FRAMERATE (FPS)"))
         self.fps_buttons = []
         for i, fps in enumerate(self.fps_options):
-            x = 580 + i * 110
-            rect = pygame.Rect(x, 250, 95, 55)
+            rect = pygame.Rect(card.x + 24 + i * 110, card.y + 65, 95, 60)
             self.fps_buttons.append(rect)
-            color = (255, 215, 0) if fps == CURRENT_FPS else (40, 40, 60)
-            pygame.draw.rect(screen, color, rect)
-            pygame.draw.rect(screen, (255, 255, 255), rect, 4 if fps == CURRENT_FPS else 2)
-            txt = self.font.render(str(fps), True, (255, 255, 255))
-            screen.blit(txt, txt.get_rect(center=rect.center))
+            self._button(screen, rect, str(fps), fps == CURRENT_FPS)
 
-        # Race Mode
-        mode_title = self.font.render(get_text("DÉLKA ZÁVODU"), True, (200, 200, 220))
-        screen.blit(mode_title, (580, 340))
+        # Délka závodu
+        card = pygame.Rect(right, 180, card_w, 150)
+        self._card(screen, card, get_text("DÉLKA ZÁVODU"))
         self.race_mode_buttons = []
         for i, mode in enumerate(self.race_modes):
-            x = 580 + i * 320
-            rect = pygame.Rect(x, 390, 280, 60)
+            rect = pygame.Rect(card.x + 24 + i * 330, card.y + 65, 310, 60)
             self.race_mode_buttons.append(rect)
-            color = (255, 215, 0) if i == self.current_race_mode_index else (40, 40, 60)
-            pygame.draw.rect(screen, color, rect)
-            pygame.draw.rect(screen, (255, 255, 255), rect, 4 if i == self.current_race_mode_index else 2)
-            txt_text = "SHORT RACE" if mode == "SHORT" else "FULL RACE (1h30+)"
-            txt = self.font.render(txt_text, True, (255, 255, 255))
-            screen.blit(txt, txt.get_rect(center=rect.center))
+            label = get_text("SHORT RACE" if mode == "SHORT" else "FULL RACE (1h30+)")
+            self._button(screen, rect, label, i == self.current_race_mode_index)
 
-        # Language
-        lang_title = self.font.render(get_text("JAZYK"), True, (200, 200, 220))
-        screen.blit(lang_title, (580, 480))
+        # Jazyk
+        card = pygame.Rect(left, 360, card_w, 150)
+        self._card(screen, card, get_text("JAZYK"))
         self.language_buttons = []
         for i, lang in enumerate(self.languages):
-            x = 580 + i * 320
-            rect = pygame.Rect(x, 530, 280, 60)
+            rect = pygame.Rect(card.x + 24 + i * 220, card.y + 65, 200, 60)
             self.language_buttons.append(rect)
-            color = (255, 215, 0) if i == self.current_language_index else (40, 40, 60)
-            pygame.draw.rect(screen, color, rect)
-            pygame.draw.rect(screen, (255, 255, 255), rect, 4 if i == self.current_language_index else 2)
-            txt = self.font.render(lang, True, (255,255,255))
-            screen.blit(txt, txt.get_rect(center=rect.center))
+            self._button(screen, rect, lang, i == self.current_language_index)
 
         # Zobrazení (celá obrazovka; přepíná i F11)
-        screen.blit(self.font.render(get_text("DISPLAY"), True, (200, 200, 220)), (580, 620))
-        self.fullscreen_rect = pygame.Rect(580, 670, 600, 60)
-        pygame.draw.rect(screen, (255, 215, 0) if IS_FULLSCREEN else (40, 40, 60), self.fullscreen_rect)
-        pygame.draw.rect(screen, (255, 255, 255), self.fullscreen_rect, 4 if IS_FULLSCREEN else 2)
+        card = pygame.Rect(right, 360, card_w, 150)
+        self._card(screen, card, get_text("DISPLAY"))
+        self.fullscreen_rect = pygame.Rect(card.x + 24, card.y + 65, 640, 60)
         state_text = get_text("ON" if IS_FULLSCREEN else "OFF")
-        txt = self.font.render(f"{get_text('FULLSCREEN')}: {state_text}  (F11)", True, (255, 255, 255))
-        screen.blit(txt, txt.get_rect(center=self.fullscreen_rect.center))
+        self._button(screen, self.fullscreen_rect, f"{get_text('FULLSCREEN')}: {state_text}  (F11)", IS_FULLSCREEN)
 
         # Strange sound (vlastní zvuk výhry, viz STRANGE_SOUND)
-        screen.blit(self.font.render(get_text("STRANGE SOUND"), True, (200, 200, 220)), (1220, 620))
-        self.strange_sound_rect = pygame.Rect(1220, 670, 280, 60)
-        pygame.draw.rect(screen, (255, 215, 0) if STRANGE_SOUND_ENABLED else (40, 40, 60), self.strange_sound_rect)
-        pygame.draw.rect(screen, (255, 255, 255), self.strange_sound_rect, 4 if STRANGE_SOUND_ENABLED else 2)
-        txt = self.font.render(get_text("ON" if STRANGE_SOUND_ENABLED else "OFF"), True, (255, 255, 255))
-        screen.blit(txt, txt.get_rect(center=self.strange_sound_rect.center))
+        card = pygame.Rect(left, 540, 340, 150)
+        self._card(screen, card, get_text("STRANGE SOUND"))
+        self.strange_sound_rect = pygame.Rect(card.x + 24, card.y + 65, 292, 60)
+        self._button(screen, self.strange_sound_rect, get_text("ON" if STRANGE_SOUND_ENABLED else "OFF"),
+                     STRANGE_SOUND_ENABLED)
 
         # Úvod rádia boxové zdi (co zazní před "Box, box" - cyklí se po kliknutí)
-        screen.blit(self.font.render(get_text("RADIO INTRO"), True, (200, 200, 220)), (1220, 770))
-        self.radio_intro_rect = pygame.Rect(1220, 820, 280, 60)
-        radio_on = RADIO_INTRO_MODE != "OFF"
-        pygame.draw.rect(screen, (255, 215, 0) if radio_on else (40, 40, 60), self.radio_intro_rect)
-        pygame.draw.rect(screen, (255, 255, 255), self.radio_intro_rect, 4 if radio_on else 2)
-        txt = self.font.render(get_text("RADIO_" + RADIO_INTRO_MODE), True, (255, 255, 255))
-        screen.blit(txt, txt.get_rect(center=self.radio_intro_rect.center))
+        card = pygame.Rect(left + 360, 540, 340, 150)
+        self._card(screen, card, get_text("RADIO INTRO"))
+        self.radio_intro_rect = pygame.Rect(card.x + 24, card.y + 65, 292, 60)
+        self._button(screen, self.radio_intro_rect, get_text("RADIO_" + RADIO_INTRO_MODE), RADIO_INTRO_MODE != "OFF")
 
         # Testovací režim (dočasný)
-        screen.blit(self.font.render(f"{get_text('TEST MODE')}  -  {get_text('TEST MODE LAPS')}", True, (255, 160, 60)), (580, 770))
-        self.test_mode_rect = pygame.Rect(580, 820, 280, 60)
-        pygame.draw.rect(screen, (255, 140, 0) if TEST_MODE else (40, 40, 60), self.test_mode_rect)
-        pygame.draw.rect(screen, (255, 255, 255), self.test_mode_rect, 4 if TEST_MODE else 2)
-        txt = self.font.render(get_text('ON' if TEST_MODE else 'OFF'), True, (255, 255, 255))
-        screen.blit(txt, txt.get_rect(center=self.test_mode_rect.center))
+        test_color = (255, 150, 40)
+        card = pygame.Rect(right, 540, card_w, 185)
+        self._card(screen, card, f"{get_text('TEST MODE')}  -  {get_text('TEST MODE LAPS')}", test_color)
+        self.test_mode_rect = pygame.Rect(card.x + 24, card.y + 65, 280, 60)
+        self._button(screen, self.test_mode_rect, get_text('ON' if TEST_MODE else 'OFF'), TEST_MODE, test_color)
         self.test_lap_buttons = []
         for i, lap_count in enumerate(TEST_MODE_LAP_OPTIONS):
-            rect = pygame.Rect(890 + i * 110, 820, 95, 60)
+            rect = pygame.Rect(card.x + 330 + i * 110, card.y + 65, 95, 60)
             self.test_lap_buttons.append(rect)
-            selected = TEST_MODE and lap_count == TEST_MODE_LAPS
-            pygame.draw.rect(screen, (255, 140, 0) if selected else (40, 40, 60), rect)
-            pygame.draw.rect(screen, (255, 255, 255), rect, 4 if selected else 2)
-            txt = self.font.render(str(lap_count), True, (255, 255, 255))
-            screen.blit(txt, txt.get_rect(center=rect.center))
-        screen.blit(self.font_small.render(get_text("TEST MODE HINT"), True, (160, 160, 180)), (580, 895))
+            self._button(screen, rect, str(lap_count), TEST_MODE and lap_count == TEST_MODE_LAPS, test_color)
+        screen.blit(self.font_small.render(get_text("TEST MODE HINT"), True, (160, 160, 180)),
+                    (card.x + 24, card.y + 140))
 
-        back = self.font_small.render("ESC = zpět", True, (160, 160, 180))
-        screen.blit(back, (780, 980))
+        back = self.font_small.render(get_text("ESC BACK"), True, (160, 160, 180))
+        screen.blit(back, back.get_rect(centerx=960, centery=990))
 
 def change_screen(new_state):
     global current_screen, game_state

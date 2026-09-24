@@ -27,6 +27,22 @@ snímek přeškáluje v `present_frame()` (smoothscale, zachovaný poměr 16:9, 
   mapování myši tam a zpět. NEověřeno na skutečném displeji (DPI awareness, F11 na
   reálné obrazovce) - stojí za to zkusit ručně.
 
+## Vzhled obrazovek (pozadí)
+Pozadí se kreslí JEDNOU do povrchu v paměti a pak se jen blituje (dřív menu kreslilo 1080
+čar přechodu každý snímek).
+- **Menu:** `MenuScreen._build_background()` = přechod + silueta náhodné tratě z `tracks`
+  (`_fit_track_points` roztáhne racing_line do plochy pod nadpisem, poměr jako mapa v závodě
+  0,72:0,44) + cílová čára + název tratě vpravo dole. `MenuScreen.update()` posouvá 10 teček v
+  barvách týmů (`menu_cars`) po trati.
+- **Nastavení:** `get_carbon_background()` (modulová cache) = karbonový vzor z dlaždice 2x2 +
+  ztmavení k okrajům. Sekce jsou karty (`_card`, `_button`) v mřížce 2 sloupce (x 240 / 980,
+  šířka 700). Obdélníky tlačítek se nastavují v `draw()`, `handle_events()` je jen čte.
+  Popisky SHORT/FULL a "ESC = zpět" (`ESC BACK`) jdou teď přes `get_text()`.
+- **Závod:** `ChampionshipScreen.RACE_PANELS` (leaderboard, mapa, ovládání + boxy jezdců,
+  pořadí) s okrajem v barvě hráčova týmu, cache `_race_panels_background()`. Při SC/VSC/žluté
+  vlajce pulzuje žlutý okraj obrazovky (`_draw_flag_border`). Mapa se už neškáluje každý snímek
+  (`track_image` je zmenšená v `_load_race`). Při posunu prvků UI upravit i `RACE_PANELS`.
+
 ## Cesty k souborům (mapy, zvuky, uložené hry)
 Všechny cesty k assetům (mapa tratě `tracks_data.py -> "map"`, zvuky `START_COMMENT_CS/EN`,
 `save_folder`) se skládají přes `SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))`
