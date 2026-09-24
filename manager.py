@@ -480,6 +480,26 @@ track_map = [
 (350,420),
 ]
 
+# === TEMPO JEZDCŮ (z DRIVER_BASE_TIMES v championship_data.py) ===
+# Nižší base_lap_time = rychlejší jezdec. Základní rychlost je 1.0 u referenčního času a
+# rozdíl časů se promítá s váhou DRIVER_PACE_WEIGHT (1.0 = rozdíl 1:1, tj. 1.80 vs 1.91
+# by byl ~6 % - na reálnou F1, kde je pole v ~2-3 %, moc). Navíc má každý jezdec v každém
+# závodě náhodnou formu +-RACE_FORM_SPREAD, aby nevyhrával pořád stejný.
+DRIVER_REFERENCE_LAP_TIME = 1.85
+DRIVER_PACE_WEIGHT = 0.6
+RACE_FORM_SPREAD = 0.01
+
+
+def driver_base_speed(base_lap_time):
+    return 1.0 + DRIVER_PACE_WEIGHT * (DRIVER_REFERENCE_LAP_TIME - base_lap_time) / DRIVER_REFERENCE_LAP_TIME
+
+
+def chance_in(rate, amount):
+    """Pravděpodobnost, že jev s pravděpodobností `rate` za jednotku (kolo, sekundu) nastane
+    během `amount` jednotek. Složené, ne lineární - sedí i pro velký krok (time_scale 20x)."""
+    return 1.0 - (1.0 - min(rate, 0.999)) ** max(0.0, amount)
+
+
 class Team:
     def __init__(self, name, drivers, color):
         self.name = name
@@ -521,7 +541,8 @@ class Driver: # jezdec
         self.pace_mode = "NEUTRAL"
         self.ai_decision_timer = 0.0
         
-        self.base_speed = random.uniform(0.95, 1.05)
+        self.base_speed = driver_base_speed(base_lap_time)
+        self.race_form = 1.0          # forma v jednom závodě, losuje se v _load_race
         self.overtake_skill = random.uniform(0.8, 1.2)
 
         self.drs_active = False
@@ -560,7 +581,7 @@ class Driver: # jezdec
 def racing_speed(driver, race):
     """Rychlost auta při normálním závodním tempu (bez SC, boxů a DRS): základ auta,
     opotřebení, tempo směsi a přilnavost gum na aktuální vlhkosti trati."""
-    speed = driver.base_speed
+    speed = driver.base_speed * driver.race_form
     speed *= (1 - driver.tire_wear * 0.4)
     speed *= TIRES[driver.tire]["speed"]
     speed *= tire_grip(driver.tire, race.track_wetness)
@@ -578,6 +599,10 @@ def get_speed(driver, race, delta_time=None):
         # Nikdy ale rychleji, než by jelo ve skutečném závodním tempu - odlapující se
         # auto tak nelétá kolem koloně rychlostí, kterou by v závodě nikdy nemělo.
         return min(race.get_safety_car_speed(driver), racing_speed(driver, race))
+
+    if race.vsc_active and not driver.in_pit:
+        # VSC: celé pole jede stejným sníženým tempem, takže se rozestupy zmrazí
+        return min(VSC_PACE, racing_speed(driver, race))
 
     if driver.pit_phase == "SERVICE":
         return 0.0  # stojí u svého boxu (výměna pneumatik)
@@ -760,8 +785,21 @@ OVERTAKE_RATE_PER_SEC = 0.22       # NEUTRAL tempo; * overtake_skill (0.8-1.2), 
 OVERTAKE_COOLDOWN = 3.0            # s klidu pro oba jezdce po vyřešeném souboji (win i loss)
 
 SAFETY_CAR_DURATION = 8.0
-VSC_DURATION = 6.0
 RED_FLAG_DURATION = 5.0
+
+# === VIRTUÁLNÍ SAFETY CAR ===
+VSC_PACE = 0.65              # společné tempo pole pod VSC (body racing_line/s před time_compression)
+VSC_MIN_LAPS = 0.5           # délka VSC v kolech (náhodně v rozsahu)
+VSC_MAX_LAPS = 1.5
+
+# === INCIDENTY A NÁHODNÝ SAFETY CAR ===
+# Pravděpodobnosti jsou ZA KOLO (jezdce, resp. lídra u SC), ne za snímek - jinak by počet
+# nehod závisel na FPS a time_scale (stejná chyba jako dřív u předjíždění). Násobí se
+# rizikem podle vlhkosti trati / nevhodných gum (viz generate_incident).
+INCIDENT_SPIN_PER_LAP = 0.0025     # spin -> žlutá vlajka
+INCIDENT_DNF_PER_LAP = 0.0012      # porucha / nehoda -> DNF (+ SC nebo VSC)
+INCIDENT_COOLDOWN_LAPS = 1.0       # po spinu má jezdec tolik kol klid
+RANDOM_SC_PER_LAP = 0.004          # náhodný Safety Car (trosky na trati apod.)
 
 DRS_GAP_THRESHOLD = 3.5  # max. odstup (ve stejných jednotkách jako track_index) pro aktivaci DRS
 DRS_FIRST_LAP = 3        # DRS se povoluje až od 3. kola (jako ve F1 - první dvě kola je zakázané)
@@ -982,29 +1020,29 @@ def ai_should_pit(driver, race):
 
     return False
 
-def generate_incident(driver, race):
-    """Snížená šance na incidenty + odstraněno DNF kvůli palivu"""
-    if driver.is_dnf or driver.incident_cooldown > 0:
-        driver.incident_cooldown = max(0, driver.incident_cooldown - 1)
+def generate_incident(driver, race, frame_laps):
+    """Incidenty jezdce za `frame_laps` kol (část kola odpovídající tomuto snímku)."""
+    if driver.is_dnf:
         return False
-
-    roll = random.random()
+    if driver.incident_cooldown > 0:
+        driver.incident_cooldown = max(0.0, driver.incident_cooldown - frame_laps)
+        return False
 
     # Mokrá trať a špatné gumy (slick v dešti) zvyšují riziko nehody
     risk = 1.0 + 1.5 * race.track_wetness
     if tire_grip(driver.tire, race.track_wetness) < 0.8:
         risk += 2.5
 
-    # Velmi nízká šance na jakýkoliv incident
-    if roll < 0.004 * risk:          # ~1x za 40–50 sekund při 20x
+    if random.random() < chance_in(INCIDENT_SPIN_PER_LAP * risk, frame_laps):
         # Lehká nehoda → Yellow flag
         driver.engine_damage += 0.35
         race.yellow_flag_active = True
+        race.yellow_flag_timer = 0.0
         print(f"🟡 ŽLUTÁ VLÁJKA – {driver.name} měl spin!")
-        driver.incident_cooldown = 10
+        driver.incident_cooldown = INCIDENT_COOLDOWN_LAPS
         return True
 
-    elif roll < 0.007 * risk:        # Motor / Crash
+    elif random.random() < chance_in(INCIDENT_DNF_PER_LAP * risk, frame_laps):   # Motor / Crash
         driver.is_dnf = True
         driver.dnf_reason = random.choice(["Engine", "Crash", "Big Shunt", "Spin + Wall"])
         driver.finished = True
@@ -1017,9 +1055,9 @@ def generate_incident(driver, race):
                 race.safety_car_timer = max(race.safety_car_timer, random.uniform(8, 15))
             else:
                 race.deploy_safety_car(12, 28)
-        else:
+        elif not race.safety_car_active:   # pod SC se VSC nevyhlašuje
             race.vsc_active = True
-            race.vsc_timer = random.uniform(8, 18)
+            race.vsc_timer = random.uniform(VSC_MIN_LAPS, VSC_MAX_LAPS) * race.lap_race_seconds()
         return True
 
     return False
@@ -1209,8 +1247,9 @@ class ChampionshipScreen(Screen):
             driver.planned_stops = 2 if random.random() < 0.7 else 1
             driver.is_dnf = False
             driver.dnf_reason = None
-            driver.incident_cooldown = 0
+            driver.incident_cooldown = 0.0
             driver.battle_cooldown = 0.0
+            driver.race_form = 1.0 + random.uniform(-RACE_FORM_SPREAD, RACE_FORM_SPREAD)
 
             ai_plan_stint(driver, self, True)
 
@@ -1237,7 +1276,9 @@ class ChampionshipScreen(Screen):
         self.safety_car_phase = "NONE"
         self.safety_car_in_lane = False
         self.vsc_active = False
+        self.vsc_timer = 0.0
         self.yellow_flag_active = False
+        self.yellow_flag_timer = 0.0
 
         self.race_phase = RACE_PHASE_FORMATION
         self.formation_lap_completed = False
@@ -1249,6 +1290,10 @@ class ChampionshipScreen(Screen):
         self.race_start_time = 0.0               # race_time, kdy zhasla světla
 
         print(f"✅ {CURRENT_RACE_MODE} režim spuštěn - {original_laps} kol")
+
+    def lap_race_seconds(self):
+        """Přibližná délka kola v race_time sekundách (stejná jednotka jako vlhkost trati)."""
+        return len(self.current_track["racing_line"]) / max(0.05, getattr(self, 'time_compression', 1.0))
 
     def finish_race(self):
         if self.race_finished:
@@ -1535,7 +1580,8 @@ class ChampionshipScreen(Screen):
 
         # Vlhkost trati se mění podle "kol" (jedno kolo = path_len / time_compression race-sekund),
         # takže rychlost mokření/schnutí je stejná na všech tratích i v SHORT/FULL.
-        lap_race_seconds = len(self.current_track["racing_line"]) / max(0.05, getattr(self, 'time_compression', 1.0))
+        lap_race_seconds = self.lap_race_seconds()
+        frame_laps = delta_time / lap_race_seconds   # kolik "kol" odpovídá tomuto snímku
         if self.current_weather == "RAIN":
             self.track_wetness += delta_time / (WETTING_LAPS * lap_race_seconds)
         else:
@@ -1543,8 +1589,9 @@ class ChampionshipScreen(Screen):
         self.track_wetness = max(0.0, min(1.0, self.track_wetness))
 
         # === SAFETY CAR LOGIKA (jako ve skutečné F1) ===
-        if (random.random() < 0.001 * (1.0 + 1.5 * self.track_wetness) and not self.safety_car_active
-                and self.race_phase == RACE_PHASE_RACING and self.race_time > 25):
+        if (not self.safety_car_active and self.race_phase == RACE_PHASE_RACING
+                and self.race_time - self.race_start_time > START_NO_BATTLE_SECONDS
+                and random.random() < chance_in(RANDOM_SC_PER_LAP * (1.0 + 1.5 * self.track_wetness), frame_laps)):
             self.deploy_safety_car(20, 55)
             print("🚨 SAFETY CAR OUT - Jezdci se seřazují za ním!")
 
@@ -1582,8 +1629,8 @@ class ChampionshipScreen(Screen):
 
             driver.ai_decision_timer += delta_time
 
-            if self.race_phase == RACE_PHASE_RACING and random.random() < 0.012 and not driver.is_dnf:
-                generate_incident(driver, self)
+            if self.race_phase == RACE_PHASE_RACING:
+                generate_incident(driver, self, frame_laps)
 
             # AI rozhodnutí (před startem - formační kolo a semafor - se nepituje ani nemění tempo)
             if (self.race_phase == RACE_PHASE_RACING and
@@ -1607,7 +1654,6 @@ class ChampionshipScreen(Screen):
             speed *= getattr(self, 'time_compression', 1.0)
 
             # Základní posun
-            segments_per_sec = path_len / max(1.0, driver.base_lap_time * 1.1)
             driver.progress += speed * delta_time
 
             while driver.progress >= 1.0:
@@ -1992,6 +2038,8 @@ class ChampionshipScreen(Screen):
         self.safety_car_index = int(rest)
         self.safety_car_progress = rest - int(rest)
 
+        self.vsc_active = False            # skutečný SC nahrazuje VSC
+        self.vsc_timer = 0.0
         self.safety_car_active = True
         self.safety_car_phase = "WAITING"
         self.safety_car_in_lane = True
@@ -2125,8 +2173,9 @@ class ChampionshipScreen(Screen):
         for d in self.drivers:
             d.drs_active = False
 
-        if self.race_phase != RACE_PHASE_RACING or self.safety_car_active:
-            return  # DRS je před startem (formační kolo, semafor) a pod Safety Carem vypnuté
+        if (self.race_phase != RACE_PHASE_RACING or self.safety_car_active
+                or self.vsc_active or self.yellow_flag_active):
+            return  # DRS je před startem (formační kolo, semafor), pod SC/VSC a při žluté vlajce vypnuté
         if not ordered or ordered[0].current_lap < DRS_FIRST_LAP:
             return  # a v prvních dvou kolech závodu (current_lap = kolo, které lídr právě jede)
 
@@ -2149,8 +2198,9 @@ class ChampionshipScreen(Screen):
         přes pár zatáček. Po ÚSPĚŠNÉM předjetí navíc oba jezdci dostanou `battle_cooldown`,
         aby stejná dvojice hned zase nezačala přehazovat pozice tam a zpátky (neúspěšný pokus
         cooldown nedává - při správně škálované pravděpodobnosti to není potřeba)."""
-        if not self.current_track or self.safety_car_active or self.race_phase != RACE_PHASE_RACING:
-            return  # Žádné předjíždění během Safety Caru ani před startem (formační kolo, semafor)
+        if (not self.current_track or self.safety_car_active or self.vsc_active
+                or self.yellow_flag_active or self.race_phase != RACE_PHASE_RACING):
+            return  # Žádné předjíždění pod SC/VSC, při žluté vlajce ani před startem (formační kolo, semafor)
         if self.race_time - self.race_start_time < START_NO_BATTLE_SECONDS:
             return  # těsně po startu se pole nejdřív roztáhne (viz START_NO_BATTLE_SECONDS)
 
@@ -2182,11 +2232,23 @@ class ChampionshipScreen(Screen):
                 attack_chance = 1.0 - (1.0 - min(rate_per_sec, 0.999)) ** max(0.0, delta_time)
 
                 if behind_speed > front_speed * 0.94 and random.random() < attack_chance:
-                    behind.track_index = front.track_index
-                    behind.progress = min(front.progress + 0.15, 0.96)
+                    self._place_driver(behind, front_pos + 0.15, path_len)
                     behind.battle_cooldown = OVERTAKE_COOLDOWN
                     front.battle_cooldown = OVERTAKE_COOLDOWN
                     print(f"⚡ {behind.name} předjel {front.name}")
+
+    def _place_driver(self, driver, position, path_len):
+        """Přesune jezdce na celkovou pozici (current_lap*path_len + track_index + progress).
+        Když tím přejede cílovou čáru, započítá se kolo stejně jako při normální jízdě - dřív
+        se při předjetí kopíroval jen track_index a jezdec za čárou přišel o celé kolo."""
+        lap, rest = divmod(position, path_len)
+        lap = int(lap)
+        if lap > driver.current_lap:
+            driver.current_stint_laps += lap - driver.current_lap
+            driver.total_time = self.race_time
+        driver.current_lap = lap
+        driver.track_index = int(rest)
+        driver.progress = rest - int(rest)
 
     def handle_events(self, events):
         global CURRENT_FPS, IS_FULLSCREEN

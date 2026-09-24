@@ -135,6 +135,36 @@ Oprava (`OVERTAKE_RATE_PER_SEC`, `OVERTAKE_COOLDOWN`, `Driver.battle_cooldown`):
 - Ladění: `OVERTAKE_RATE_PER_SEC` výš = agresivnější/rychlejší předjíždění, níž = klidnější
   pole. `OVERTAKE_COOLDOWN` výš = souboje se táhnou déle (méně "yo-yo" efektu).
 
+## Tempo jezdců, VSC, incidenty (opraveno při revizi kódu)
+- **Tempo podle jezdce:** dřív se `DRIVER_BASE_TIMES`/`base_lap_time` nikde nepoužívalo a
+  rychlost dávalo jen náhodné `base_speed` 0,95-1,05 (Williams mohl celou sezónu porážet
+  McLaren). Teď `base_speed = driver_base_speed(base_lap_time)` = `1 + DRIVER_PACE_WEIGHT *
+  (DRIVER_REFERENCE_LAP_TIME - čas) / DRIVER_REFERENCE_LAP_TIME` (ref. 1,85, váha 0,6 → pole
+  v ~3,6 %) a navíc `driver.race_form` = náhodná forma ±`RACE_FORM_SPREAD` (1 %) losovaná v
+  `_load_race()`. `racing_speed()` násobí `base_speed * race_form`. Headless: Spearmanova
+  korelace pořadí v cíli s tempem ~0,45 (zbytek = náhodný rošt, strategie, souboje; vyšší
+  váha korelaci nezvedne). Až bude kvalifikace, korelace poroste.
+- **VSC** dřív bylo jen nápisem. Teď: `get_speed()` pod VSC (mimo pit lane) vrací
+  `min(VSC_PACE, racing_speed)` - celé pole stejné tempo (0,65), rozestupy zamrznou;
+  `handle_battles()` i `update_drs()` se vrací. Délka VSC je v kolech (`VSC_MIN_LAPS`..
+  `VSC_MAX_LAPS` × `lap_race_seconds()`), ne pevné sekundy. VSC se nevyhlásí, když jede SC,
+  a `deploy_safety_car()` běžící VSC ukončí.
+- **Žlutá vlajka:** zakazuje souboje a DRS (globálně, sektory hra nemá).
+- **Incidenty a náhodný SC nezávislé na FPS:** dřív `random() < 0.012` za SNÍMEK na jezdce a
+  `random() < 0.001` za snímek pro SC → počet nehod závisel na FPS/time_scale (stejný typ bugu
+  jako dřív předjíždění). Teď jsou pravděpodobnosti ZA KOLO (`INCIDENT_SPIN_PER_LAP`,
+  `INCIDENT_DNF_PER_LAP`, `RANDOM_SC_PER_LAP`) převedené přes `chance_in(rate, frame_laps)`
+  (`1-(1-rate)**amount`), kde `frame_laps = delta_time / lap_race_seconds()`.
+  `incident_cooldown` je v kolech. Náhodný SC nejde v prvních `START_NO_BATTLE_SECONDS` po
+  startu. Headless (16 závodů, 30 i 120 FPS, 20x): ~3,5 spinu, ~1,6 DNF a ~1 SC/VSC na závod,
+  v obou nastaveních stejně.
+- **Předjetí přes cílovou čáru už nebere kolo:** `handle_battles()` dřív kopírovalo jen
+  `track_index`, takže jezdec těsně před čárou předjel auto za čárou a zůstal mu starý
+  `current_lap` (= ztratil celé kolo). Teď `_place_driver(driver, pozice, path_len)` nastaví
+  celou pozici včetně kola (a započítá kolo do `current_stint_laps`/`total_time`).
+- Ladění: `DRIVER_PACE_WEIGHT` (vliv jezdce), `VSC_PACE`, `INCIDENT_*_PER_LAP`,
+  `RANDOM_SC_PER_LAP`. Simulační skript: viz "Styl práce" (exec bez `while True`).
+
 ## Safety Car – opraveno (seřazování do vláčku funguje)
 Stav: `safety_car_active`, `safety_car_timer`, `safety_car_index`, `safety_car_progress`,
 `safety_car_laps` (kumulativní počet průjezdů SC, aby šla pozice SC srovnávat s pozicí
@@ -474,6 +504,8 @@ teď 1:1 odpovídá pořadí podle skutečné finální pozice, body klesají s 
   - driver.distance` bylo vždy 0 → `0 < 25` vždy pravda. Nahrazeno stejným pozičním
   vzorcem jako jinde (`current_lap*path_len+track_index+progress`, nový práh
   `DRS_GAP_THRESHOLD=3.5`). `driver.distance` (mrtvý atribut) smazán z `Driver.__init__`.
+  `update_drs()` vypíná DRS před startem, pod SC, pod VSC i při žluté vlajce (viz sekce
+  "Tempo jezdců, VSC, incidenty").
 - **`handle_battles()` a `update_drs()` nevyřazovaly dojeté/DNF/pitující jezdce** - šlo
   si "spočítat souboj" nebo dokonce "předjet" zaparkované auto po nehodě, nebo souboj s
   autem v boxové uličce. Obě metody teď filtrují `not d.finished and not d.is_dnf and
