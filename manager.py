@@ -190,7 +190,8 @@ TEXTS = {
     "FULL RACE (1h30+)": {"CS": "FULL RACE (1h30+)", "EN": "FULL RACE (1h30+)", "IT": "GARA COMPLETA (1H30+)"},
     "JAZYK": {"CS": "JAZYK", "EN": "LANGUAGE", "IT": "LINGUA"},
     "FRAMERATE (FPS)": {"CS": "FRAMERATE (FPS)", "EN": "FRAMERATE (FPS)", "IT": "FREQUENZA DEI FRAME"},
-    "ESC BACK": {"CS": "ESC = zpět", "EN": "ESC = back", "IT": "ESC = indietro"},
+    "BACK": {"CS": "ZPĚT", "EN": "BACK", "IT": "INDIETRO"},
+    "MENU": {"CS": "MENU", "EN": "MENU", "IT": "MENU"},
 }
 
 def audio_problem_hint(path):
@@ -372,6 +373,31 @@ def get_mouse_pos():
     mouse_x, mouse_y = pygame.mouse.get_pos()
     return (int((mouse_x - view_rect.x) * WIDTH / view_rect.w),
             int((mouse_y - view_rect.y) * HEIGHT / view_rect.h))
+
+
+BACK_BUTTON_RECT = pygame.Rect(30, 26, 210, 60)    # "ZPĚT" v levém horním rohu (nastavení, výběr týmu, trénink)
+_corner_font = None
+
+
+def draw_corner_button(screen, rect, text, icon, accent=(255, 215, 0)):
+    """Tlačítko v rohu obrazovky s ikonou nakreslenou čarami (šipka zpět / tři čárky menu) -
+    znaky jako ← nebo ☰ by se v herním fontu mohly vykreslit jako čtverečky."""
+    global _corner_font
+    if _corner_font is None:
+        _corner_font = pygame.font.SysFont("arial", 28)
+    hovered = rect.collidepoint(get_mouse_pos())
+    pygame.draw.rect(screen, (45, 45, 70) if hovered else (22, 22, 38), rect, border_radius=10)
+    pygame.draw.rect(screen, accent if hovered else (200, 200, 210), rect, 3, border_radius=10)
+    color = accent if hovered else (240, 240, 255)
+    ix, cy = rect.x + 22, rect.centery
+    if icon == "back":
+        pygame.draw.polygon(screen, color, [(ix, cy), (ix + 16, cy - 12), (ix + 16, cy + 12)])
+        pygame.draw.rect(screen, color, (ix + 14, cy - 4, 14, 8))
+    else:   # "menu"
+        for dy in (-10, 0, 10):
+            pygame.draw.rect(screen, color, (ix, cy + dy - 2, 28, 4), border_radius=2)
+    txt = _corner_font.render(text, True, color)
+    screen.blit(txt, txt.get_rect(midleft=(ix + 44, cy)))
 
 
 clock = pygame.time.Clock()
@@ -2337,6 +2363,9 @@ class ChampionshipScreen(Screen):
 
                 # Zbytek handle_events (team select, pit buttons, speed buttons atd.)
                 if self.state == "TEAM_SELECT":
+                    if BACK_BUTTON_RECT.collidepoint(pos):
+                        change_screen(GAME_STATE_MENU)
+                        return
                     for i, (team_name, team) in enumerate(self.teams.items()):
                         rect = pygame.Rect(720, 180 + i*75, 520, 70)
                         if rect.collidepoint(pos):
@@ -2346,6 +2375,10 @@ class ChampionshipScreen(Screen):
                             return
 
                 elif self.state == "SEASON_START":
+                    if BACK_BUTTON_RECT.collidepoint(pos):
+                        self.state = "TEAM_SELECT"      # zpět na výběr jiného týmu
+                        self.player_team = None
+                        return
                     if self.start_season_button and self.start_season_button.collidepoint(pos):
                         self.state = "RACE"
                         self._load_race()
@@ -2355,6 +2388,11 @@ class ChampionshipScreen(Screen):
                     if self.race_finished:
                         if self.next_race_button and self.next_race_button.collidepoint(pos):
                             self.leave_results()
+                        return
+
+                    if self.MENU_BUTTON_RECT.collidepoint(pos):    # totéž co ESC
+                        self.show_ingame_menu = True
+                        self.paused = True
                         return
 
                     # BOX otevře panel pit stopu (gumy, BOX THIS LAP / STAY OUT)
@@ -2620,7 +2658,8 @@ class ChampionshipScreen(Screen):
                     pygame.draw.circle(screen, (48, 14, 14), (cx, cy), radius)
 
     # Panely závodní obrazovky (x, y, šířka, výška): leaderboard, mapa, ovládání + boxy jezdců, pořadí
-    RACE_PANELS = [(16, 12, 454, 932), (470, 100, 740, 460), (470, 566, 800, 192), (1398, 12, 506, 948)]
+    RACE_PANELS = [(16, 12, 454, 932), (470, 100, 740, 460), (470, 566, 800, 192), (1398, 82, 506, 960)]
+    MENU_BUTTON_RECT = pygame.Rect(1904 - 190, 12, 190, 60)   # vpravo nahoře, nad panelem pořadí
 
     def _race_panels_background(self):
         """Pozadí závodu s panely orámovanými barvou hráčova týmu - kreslí se jen jednou na tým."""
@@ -2700,6 +2739,9 @@ class ChampionshipScreen(Screen):
             
             return
         
+        if self.state in ("TEAM_SELECT", "SEASON_START"):
+            draw_corner_button(screen, BACK_BUTTON_RECT, get_text("BACK"), "back")
+
         if self.state == "TEAM_SELECT":
             screen.blit(self.font_big.render(get_text("VYBERTE SVŮJ TÝM"), True, (255, 215, 0)), (720, 120))
             for i, (team_name, team) in enumerate(self.teams.items()):
@@ -3009,8 +3051,9 @@ class ChampionshipScreen(Screen):
 
             # === PRAVÝ PANEL - STANDINGS ===
             right_x = 1650
-            screen.blit(self.font_big.render(get_text("TEAM STANDINGS"), True, (255, 255, 0)), (right_x - 240, 20))
-            y = 70
+            draw_corner_button(screen, self.MENU_BUTTON_RECT, get_text("MENU"), "menu", self.player_team.color)
+            screen.blit(self.font_big.render(get_text("TEAM STANDINGS"), True, (255, 255, 0)), (right_x - 240, 90))
+            y = 140
             for i, team in enumerate(sorted(self.teams.values(), key=lambda t: t.points, reverse=True)[:10]):
                 txt = self.font.render(f"{i+1}. {team.name}: {team.points} {get_text('PTS')}", True, team.color)
                 screen.blit(txt, (right_x - 240, y))
@@ -3064,17 +3107,20 @@ class ChampionshipScreen(Screen):
 class PracticeScreen(Screen):
     def draw(self, screen):
         screen.fill((0,0,100))
-        
+        draw_corner_button(screen, BACK_BUTTON_RECT, get_text("BACK"), "back")
+
     # updaty
     def update(self, delta_time):
         pass
-    
-    # eventy    
+
+    # eventy
     def handle_events(self, events):
         for event in events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     change_screen(GAME_STATE_MENU)
+            elif event.type == pygame.MOUSEBUTTONDOWN and BACK_BUTTON_RECT.collidepoint(get_mouse_pos()):
+                change_screen(GAME_STATE_MENU)
 _carbon_background = None
 
 
@@ -3142,19 +3188,27 @@ class SettingsScreen(Screen):
         self.from_ingame = False
         self.race_screen = None  # rozjetý ChampionshipScreen, ke kterému se ESC vrátí
 
+    def go_back(self):
+        if self.from_ingame:
+            change_screen(GAME_STATE_RACE)
+        else:
+            change_screen(GAME_STATE_MENU)
+
     def handle_events(self, events):
         global CURRENT_FPS, IS_FULLSCREEN, CURRENT_RACE_MODE, CURRENT_LANGUAGE, TEST_MODE, TEST_MODE_LAPS, STRANGE_SOUND_ENABLED, RADIO_INTRO_MODE
 
         for event in events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    if self.from_ingame:
-                        change_screen(GAME_STATE_RACE)
-                    else:
-                        change_screen(GAME_STATE_MENU)
+                    self.go_back()
+                    return
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 pos = get_mouse_pos()
+
+                if BACK_BUTTON_RECT.collidepoint(pos):
+                    self.go_back()
+                    return
 
                 if self.fullscreen_rect and self.fullscreen_rect.collidepoint(pos):
                     toggle_fullscreen()
@@ -3285,8 +3339,7 @@ class SettingsScreen(Screen):
         screen.blit(self.font_small.render(get_text("TEST MODE HINT"), True, (160, 160, 180)),
                     (card.x + 24, card.y + 140))
 
-        back = self.font_small.render(get_text("ESC BACK"), True, (160, 160, 180))
-        screen.blit(back, back.get_rect(centerx=960, centery=990))
+        draw_corner_button(screen, BACK_BUTTON_RECT, get_text("BACK"), "back")
 
 def change_screen(new_state):
     global current_screen, game_state

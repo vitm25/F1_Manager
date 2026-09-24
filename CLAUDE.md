@@ -37,7 +37,13 @@ Pozadí se kreslí JEDNOU do povrchu v paměti a pak se jen blituje (dřív menu
 - **Nastavení:** `get_carbon_background()` (modulová cache) = karbonový vzor z dlaždice 2x2 +
   ztmavení k okrajům. Sekce jsou karty (`_card`, `_button`) v mřížce 2 sloupce (x 240 / 980,
   šířka 700). Obdélníky tlačítek se nastavují v `draw()`, `handle_events()` je jen čte.
-  Popisky SHORT/FULL a "ESC = zpět" (`ESC BACK`) jdou teď přes `get_text()`.
+  Popisky SHORT/FULL jdou teď přes `get_text()`.
+- **Tlačítka v rohu** (`draw_corner_button()`, ikona kreslená čarami, ne znakem ←/☰ - font by
+  je mohl kreslit jako čtverečky): "ZPĚT" vlevo nahoře (`BACK_BUTTON_RECT`) v Nastavení
+  (`SettingsScreen.go_back()` = totéž co ESC, ze závodu vrací do rozjetého závodu), v Tréninku,
+  na výběru týmu (-> hlavní menu) a na začátku sezóny (-> zpět na výběr týmu). V závodě "MENU"
+  vpravo nahoře (`ChampionshipScreen.MENU_BUTTON_RECT`, okraj v barvě týmu) otevře in-game menu
+  jako ESC; panel pořadí je kvůli němu posunutý o 70 px dolů. ESC funguje všude dál.
 - **Závod:** `ChampionshipScreen.RACE_PANELS` (leaderboard, mapa, ovládání + boxy jezdců,
   pořadí) s okrajem v barvě hráčova týmu, cache `_race_panels_background()`. Při SC/VSC/žluté
   vlajce pulzuje žlutý okraj obrazovky (`_draw_flag_border`). Mapa se už neškáluje každý snímek
