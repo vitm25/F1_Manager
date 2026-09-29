@@ -3,6 +3,11 @@ import sys
 import os
 import math
 
+# Všechny cesty se počítají od složky s tímhle skriptem, ne od aktuálního pracovního
+# adresáře - jinak editor nenajde obrázek tratě, když se spustí z jiné složky (IDE,
+# dvojklik, terminál v nadřazené složce). Stejný důvod jako SCRIPT_DIR v manager.py.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 pygame.init()
 
 WIDTH = 1920
@@ -17,8 +22,12 @@ small_font = pygame.font.SysFont("arial", 18)
 # =========================================================
 # NASTAVENÍ
 # =========================================================
-TRACK_IMAGE_PATH = "tracks/usavegas.png"
-OUTPUT_FILE = "racing_lines/las_vegas.py"
+# Název tratě: použije se obrázek tracks/<TRACK>.png a výstup racing_lines/<TRACK>.py
+# (dřív tu byla natvrdo cesta "tracks/usavegas.png", jenže takový soubor ve složce tracks/
+# neexistuje - jmenuje se las_vegas.png - a editor hned po spuštění spadl.)
+TRACK = "las_vegas"
+TRACK_IMAGE_PATH = os.path.join(SCRIPT_DIR, "tracks", f"{TRACK}.png")
+OUTPUT_FILE = os.path.join(SCRIPT_DIR, "racing_lines", f"{TRACK}.py")
 
 DISPLAY_WIDTH = 1000
 DISPLAY_HEIGHT = 1000
@@ -54,6 +63,14 @@ sector_points = []
 # =========================================================
 # LOAD TRACK
 # =========================================================
+if not os.path.exists(TRACK_IMAGE_PATH):
+    available = sorted(f[:-4] for f in os.listdir(os.path.join(SCRIPT_DIR, "tracks")) if f.endswith(".png"))
+    print(f"CHYBA: obrázek tratě '{TRACK}' neexistuje ({TRACK_IMAGE_PATH}).")
+    print("Dostupné tratě (nastav proměnnou TRACK nahoře):")
+    print("  " + ", ".join(available))
+    pygame.quit()
+    sys.exit(1)
+
 track_image_original = pygame.image.load(TRACK_IMAGE_PATH)
 track_image = pygame.transform.scale(track_image_original, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
 track_rect = track_image.get_rect(center=(WIDTH // 2, HEIGHT // 2))
@@ -234,7 +251,7 @@ def draw_ui():
         panel_y += 30
 
 def handle_click(mouse_pos):
-    global current_drs_start, drs_zones, sector_points
+    global current_drs_start, sector_points   # drs_zones se jen mutuje (append), global netřeba
 
     if not track_rect.collidepoint(mouse_pos):
         return

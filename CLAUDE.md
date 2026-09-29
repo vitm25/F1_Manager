@@ -90,8 +90,12 @@ vždy ho načítat přes `os.path.join(SCRIPT_DIR, ...)`, jinak se stejný bug v
   hlavní smyčka `while True`.
 - `tracks_data.py` – data tratí (racing_line, mapa, DRS zóny, pit lane, laps…).
 - `championship_data.py` – `TEAMS`, `DRIVER_BASE_TIMES`, `CALENDAR_2025`.
-- `cover2.py` – (zjistit účel, pokud bude potřeba).
-- `racing_line_editor.py` – editor tras pro `racing_lines/`.
+- `cover2.py` – STARŠÍ VERZE celé hry (1280x720, vlastní main loop). Není odnikud
+  importovaná, hra ji nepoužívá - je to záloha dřívějšího milníku.
+- `racing_line_editor.py` – editor tras pro `racing_lines/`. Nahoře se nastaví `TRACK`
+  (název bez přípony, např. `las_vegas`), cesty se skládají přes `SCRIPT_DIR`. Dřív tu byla
+  natvrdo `tracks/usavegas.png`, která ve složce `tracks/` neexistuje → editor hned spadl;
+  teď při chybějícím obrázku vypíše seznam dostupných tratí.
 - `saves/`, `savegame.json` – uložené hry v JSON.
 - `sounds/` – `start_cz.mp3`, `start_en.mp3`.
 
@@ -102,10 +106,29 @@ vždy ho načítat přes `os.path.join(SCRIPT_DIR, ...)`, jinak se stejný bug v
 ## Lokalizace
 Vše přes slovník `TEXTS` + `get_text(key)`. Nikdy nenechávat hardcoded české texty v UI.
 
-## Race mode (SHORT vs FULL)
+## Race mode (SHORT vs FULL) - POZOR, názvy zatím neodpovídají chování
 Oba režimy jedou **plný počet kol** z dat tratě. Liší se jen `self.time_compression`
-(nastaveno v `_load_race`, ~řádek 684): FULL = 1.0 (reálný čas), SHORT = 0.35
-(zrychleno). Používá se v `update()` při výpočtu posunu: `speed *= self.time_compression`.
+(nastaveno v `_load_race`): FULL = 1.0, SHORT = 0.35. Používá se v `update()` při výpočtu
+posunu: `speed *= self.time_compression`, takže **nižší hodnota = pomalejší kolo**.
+
+Naměřeno (time_scale 1x, tj. 1 race-sekunda = 1 reálná sekunda):
+
+| trať | bodů | SHORT s/kolo | SHORT závod | FULL s/kolo | FULL závod | reálná F1 |
+|------|-----:|-------------:|------------:|------------:|-----------:|----------:|
+| Australia | 44 | 126 s | 2 h 02 | 44 s | 43 min | ~80 s |
+| Monaco | 77 | 220 s | 4 h 46 | 77 s | 1 h 40 | ~72 s |
+| Belgium | 71 | 203 s | 2 h 29 | 71 s | 52 min | ~105 s |
+| Monza | 39 | 111 s | 1 h 38 | 39 s | 34 min | ~81 s |
+
+Z toho plynou dva otevřené problémy (rozhodnutí je na uživateli, viz TODO):
+1. **"SHORT" je ~2,9x DELŠÍ než "FULL"** - názvy i popisek "FULL RACE (1h30+)" jsou obrácené.
+2. **Délka kola je úměrná počtu bodů `racing_line`**, což je jen rozlišení ručního kreslení
+   tratě (39-80 bodů), ne reálná délka okruhu. Monza (39 bodů) má proto nejkratší kolo,
+   přestože je ve skutečnosti mezi delšími. Stejný problém mělo kdysi formační kolo a vyřešil
+   se tabulkou `TRACK_LENGTH_KM` - závodní kolo čeká na totéž.
+
+Pozn.: herní BALANC už na tomhle nezávisí - opotřebení, incidenty, souboje, AI strategie i
+počasí jsou přepočítané na KOLA, ne na sekundy. Mění se jen délka hodin na obrazovce.
 
 ## Hlavní třídy/stavy
 `ChampionshipScreen.state`: `TEAM_SELECT` → `SEASON_START` → `RACE`, plus `SAVE_LIST`.
@@ -119,43 +142,52 @@ Race phases (`self.race_phase`): `RACE_PHASE_FORMATION` → `RACE_PHASE_START` �
 Skutečná "vzdálenost" jezdce se v `handle_battles()` počítá jako
 `current_lap * path_len + track_index + progress` (kde `progress` je 0–1 úsek mezi
 dvěma body racing line a `path_len = len(racing_line)`). **Toto je zdroj pravdy pro
-pořadí na trati** – ne `driver.distance`, který se nastavuje jen v `__init__` na 0.0
-a nikde jinde needituje (mrtvý atribut, používá ho ale `update_drs()` pro DRS gap –
-tzn. DRS gap výpočet je aktuálně nefunkční/vždy stejný, protože `distance` se nemění).
+pořadí na trati** – používá ho `handle_battles()`, `update_drs()`, Safety Car, leaderboard
+i výsledky. (Dřív tu byl ještě mrtvý atribut `driver.distance`; ten je pryč.)
 
-## Souboje o pozici (`handle_battles`) – šance přepočtená na reálnou sekundu
-Uživatel: "jak ty auta jezdí, přijde mi to hektické". Příčina: `attack_chance` byla
-konstanta NA SNÍMEK (`0.065 * overtake_skill`, s DRS `*2.4`), vyhodnocovaná v `update()`
-každý reálný frame bez ohledu na FPS (Nastavení nabízí 30-240) nebo `time_scale`
-(1/2/4/20x). Při 60 FPS to dávalo ~98% šanci na "předjetí" (okamžitý teleport pozice)
-do JEDNÉ SEKUNDY od chvíle, co se dvě auta dostala do gapu < 2,2 bodu - a bez cooldownu
-mohla stejná dvojice hned zase přehazovat pozice tam a zpátky. Čím vyšší FPS/time_scale
-uživatel zvolil, tím častěji se `handle_battles()` volalo za stejný race-čas → tím
-"hektičtější" to bylo (viz i jinde v kódu opakovaný vzorec: cokoliv frame-rate-závislého
-= bug, srov. tire wear/weather, které jsou naopak správně škálované na `delta_time`).
+**Jednotky:** 1 "bod" = jeden úsek `racing_line`. Kolik je to sekund, se liší trať od tratě
+(39-80 bodů na kolo) i podle režimu, proto se všechny herní pravděpodobnosti a prahy zadávají
+v PODÍLU KOLA, ne v bodech ani sekundách - viz souboje, DRS a incidenty níže. Přepočet na
+sekundy pro UI dělá `lap_race_seconds()`.
 
-Oprava (`OVERTAKE_RATE_PER_SEC`, `OVERTAKE_COOLDOWN`, `Driver.battle_cooldown`):
-- `handle_battles(self, delta_time)` teď dostává `delta_time` (volá se
-  `self.handle_battles(delta_time)` z `update()`, stejná hodnota jako pro pohyb aut - už
-  po vynásobení `time_scale`).
-- `OVERTAKE_RATE_PER_SEC = 0.22` je pravděpodobnost ÚSPĚCHU ZA REÁLNOU RACE-SEKUNDU (ne za
-  frame), škálovaná stejně jako dřív `* overtake_skill` (0,8-1,2) a při DRS `* 2.4`.
-  Převod na pravděpodobnost PRO TENTO KONKRÉTNÍ FRAME je `1 - (1 - rate_per_sec) **
-  delta_time` (složené úročení, ne lineární `rate*delta_time` - správně funguje i při
-  velkém `delta_time`, např. `time_scale=20`, kde by lineární aproximace mohla přestřelit
-  přes 1.0). Výsledek: frekvence předjíždění je teď stejná bez ohledu na FPS/time_scale
-  (ověřeno headless testem - kontrolovaná dvojice aut v gapu 1.0 dala prakticky identický
-  počet předjetí za 20 race-sekund při 30/60/144/240 FPS i při `time_scale` 1-20).
-- Po ÚSPĚŠNÉM předjetí dostanou OBA jezdci `battle_cooldown = OVERTAKE_COOLDOWN` (3 s),
-  který se každý frame odečítá o `delta_time`; dokud je kladný, pár se vůbec nevyhodnocuje.
-  Zabraňuje to okamžitému "vrácení" pozice v příštím framu (typický zdroj blikání).
-  Neúspěšný pokus cooldown nedostává - u správně škálované pravděpodobnosti to není
-  potřeba (na rozdíl od staré verze, kde by to bylo nutné, aby to vůbec šlo zkrotit).
-- Práh gapu (2,2 bodu racing_line) a podmínka `behind_speed > front_speed * 0.94`
-  zůstaly beze změny - o TOM, jestli je souboj vůbec kandidátem, se nic neměnilo, jen o
-  tom, jak ČASTO a jak NEZÁVISLE NA FPS se vyhodnocuje.
-- Ladění: `OVERTAKE_RATE_PER_SEC` výš = agresivnější/rychlejší předjíždění, níž = klidnější
-  pole. `OVERTAKE_COOLDOWN` výš = souboje se táhnou déle (méně "yo-yo" efektu).
+## Souboje o pozici, jízda za soupeřem a DRS
+Uživatel: "jak ty auta jezdí, přijde mi to hektické". Hloubková revize ukázala, že šlo o tři
+spojené problémy - měřeno headless simulací (reálná F1 má ~40-60 předjetí na závod):
+
+1. **Šance na snímek** (`0.065 * overtake_skill` každý frame) - při 60 FPS bylo předjetí
+   jisté do jedné sekundy; navíc počet závisel na FPS (Nastavení nabízí 30-240) a `time_scale`.
+2. **Šance na sekundu** (mezikrok, `OVERTAKE_RATE_PER_SEC = 0.22`) - nezávislá na FPS, ale
+   pořád špatně: kolo trvá podle tratě a režimu 39-230 race-sekund a dvojice aut byla v
+   dosahu 91 % času, takže z toho vycházelo **15 484 předjetí na závod** (naměřeno).
+3. **Auta jezdila skrz sebe** - nikde nebylo omezení rychlosti autem vpředu, takže rychlejší
+   vůz projel pomalejším sám od sebe. Pozice na trati nic neznamenala (DRS ani
+   `overtake_skill` neměly reálný vliv) a pole se na mapě slepilo do jednoho shluku.
+
+Dnešní model (vše v PODÍLU KOLA, přepočet na snímek dělá `chance_in(rate, frame_laps)`
+stejně jako u incidentů - nezávislé na FPS, `time_scale` i délce kola):
+- `handle_battles(frame_laps)`: dvojice do `BATTLE_GAP_LAPS` (0,015 kola ≈ 1,3 s), útočník
+  musí být SKUTEČNĚ rychlejší (`OVERTAKE_MIN_PACE_EDGE`; s DRS stačí skoro stejné tempo -
+  dřív stačilo 0,94x tempa obránce, takže předjíždělo i výrazně pomalejší auto).
+  Šance `OVERTAKE_RATE_PER_LAP` (0,08) `* overtake_skill`, s DRS `* OVERTAKE_DRS_BONUS`.
+  Po úspěchu dostanou oba `battle_cooldown = OVERTAKE_COOLDOWN_LAPS` (0,4 kola), aby si
+  stejná dvojice nepřehazovala pozice tam a zpátky.
+- **Jízda za soupeřem** (`_frame_speeds`, počítá rychlosti VŠECH aut v jednom průchodu PŘED
+  posunem, takže nezáleží na pořadí zpracování):
+  - do `DIRTY_AIR_GAP_LAPS` (0,012 kola ≈ 1 s) ztrácí auto `DIRTY_AIR_PENALTY` (1,2 %) tempa
+    ("špinavý vzduch"), s aktivním DRS ne;
+  - do `FOLLOW_MIN_GAP_LAPS` (0,004 kola) se k soupeři nedostane blíž a jede jeho tempem -
+    musí ho nejdřív skutečně předjet. Tím vznikají vláčky aut jako v reálu.
+  - Neplatí pod SC/VSC a před startem (tam rychlosti řídí jiná pravidla).
+- **Modré vlajky:** auto o kolo pozadu soupeře nebrzdí (v `_frame_speeds` se přeskočí) a v
+  souboji ho pustí prakticky hned (`OVERTAKE_BLUE_FLAG_RATE_PER_LAP`).
+- **DRS jen v DRS zónách:** `update_drs()` teď kontroluje `in_drs_zone(driver)` proti
+  `drs_zones` z `tracks_data.py` (zóny se na mapu kreslily odjakživa, ale logika je
+  ignorovala - DRS mělo skoro celé pole pořád). Podmínky: závodní fáze, ne SC/VSC/žlutá,
+  od `DRS_FIRST_LAP`, sucho (`DRS_MAX_WETNESS`) a odstup pod `DRS_GAP_LAPS` (0,012 kola ≈ 1 s
+  jako reálné pravidlo).
+- Naměřeno po opravě: **40-57 předjetí na závod**, průměrně ~1,4 auta s DRS naráz.
+- Ladění: `OVERTAKE_RATE_PER_LAP` výš = víc předjíždění; `FOLLOW_MIN_GAP_LAPS`/
+  `DIRTY_AIR_PENALTY` výš = těžší předjíždění a delší vláčky.
 
 ## Tempo jezdců, VSC, incidenty (opraveno při revizi kódu)
 - **Tempo podle jezdce:** dřív se `DRIVER_BASE_TIMES`/`base_lap_time` nikde nepoužívalo a
@@ -184,8 +216,36 @@ Oprava (`OVERTAKE_RATE_PER_SEC`, `OVERTAKE_COOLDOWN`, `Driver.battle_cooldown`):
   `track_index`, takže jezdec těsně před čárou předjel auto za čárou a zůstal mu starý
   `current_lap` (= ztratil celé kolo). Teď `_place_driver(driver, pozice, path_len)` nastaví
   celou pozici včetně kola (a započítá kolo do `current_stint_laps`/`total_time`).
+- **Tempo PUSH/NEUTRAL/SAVE konečně něco dělá:** `PACE` mělo klíč `"pace"` (-0,4/0/+0,5),
+  který se NIKDE nepoužíval - měnilo se jen opotřebení gum, rychlost ne. Teď má `PACE`
+  klíč `"speed"` (1,012 / 1,0 / 0,985), který násobí `racing_speed()`. Hráč si tempo pro
+  každého jezdce přepíná v panelu boxové zdi (platí okamžitě, bez zajíždění do boxů) a vidí
+  ho v kartě jezdce pod mapou; AI si ho volí v `ai_choose_pace()`.
+- **Spolehlivost vozu** (`driver.reliability`, 0,82-0,98) se dřív nikde nepoužívala - porucha
+  byla u všech aut stejně pravděpodobná. Teď násobí šanci na DNF
+  (`reliability_factor = (1 - reliability) / 0.10`, tj. 0,2x až 1,8x; průměr zůstává stejný).
+- **Palivo a poškození:** `driver.fuel` byl mrtvý atribut, `engine_damage` se po smyku jen
+  zvyšoval a nikde nečetl. Teď: `race.fuel_burnt()` (0 na startu, 1 v cíli) přidává tempo
+  `FUEL_PACE_GAIN` (2,5 % mezi plnou a prázdnou nádrží, stejně pro všechny) a `engine_damage`
+  ubírá `DAMAGE_PACE_LOSS` za jednotku (max -6 %). `engine_damage` se resetuje v `_load_race`.
 - Ladění: `DRIVER_PACE_WEIGHT` (vliv jezdce), `VSC_PACE`, `INCIDENT_*_PER_LAP`,
-  `RANDOM_SC_PER_LAP`. Simulační skript: viz "Styl práce" (exec bez `while True`).
+  `RANDOM_SC_PER_LAP`, `PACE[...]["speed"]`, `FUEL_PACE_GAIN`. Simulační skript: viz
+  "Styl práce" (exec bez `while True`).
+
+## AI strategie pit stopů (opraveno - stejný typ chyby jako u soubojů)
+Naměřeno před opravou: **5,7 pit stopu na auto a závod** (reálná F1 1-2), průměrný stint
+7,6 kola, 40 % stintů kratších než 6 kol. Tři příčiny:
+- **Rozhodovací tik byl v sekundách** (`ai_decision_timer > 0.9`), takže na 125sekundovém kole
+  se AI rozhodovala ~140x ZA KOLO. Šance "0,65 na undercut" se tím losovala 140x za kolo =
+  undercut byl jistý, jakmile stint dosáhl 7 kol. Teď je tik v kolech (`AI_DECISION_LAPS`
+  = 0,2 kola) a šance jsou na kolo přes `chance_in()`.
+- **Undercut bral jako "blízko" odstup do 8 bodů** = skoro 20 % kola, do čehož spadlo půlka
+  pole. Teď `AI_UNDERCUT_GAP_LAPS` (0,03 kola ≈ 2,5 s) a až od
+  `AI_UNDERCUT_MIN_STINT` (60 %) naplánovaného stintu.
+- **Overcut se mohl opakovat donekonečna** (každý tik +2 kola k `target_stint_end`), takže
+  plánovaný pit skoro nikdy nenastal. Teď je prodloužení omezené na
+  `AI_OVERCUT_MAX_EXTENSION` kol na stint (`driver.stint_extension`).
+Po opravě: **~2,3 pitu na auto**, průměrný stint ~16 kol, žádné stinty pod 6 kol.
 
 ## Safety Car – opraveno (seřazování do vláčku funguje)
 Stav: `safety_car_active`, `safety_car_timer`, `safety_car_index`, `safety_car_progress`,
@@ -200,7 +260,9 @@ Jak to funguje:
   každého jezdce cílový slot ve frontě za SC (`sc_pos - SAFETY_CAR_LEADER_GAP - i*SAFETY_CAR_CAR_GAP`
   podle aktuálního pořadí) a rychlost dohánění úměrnou velikosti mezery
   (`SAFETY_CAR_MAX_CATCHUP_TIME` = i auto ztracené o celé kolo dožene frontu nejpozději
-  za tuto dobu). Uloží výsledky do `self._sc_speed_overrides`.
+  za tuto dobu). Uloží výsledky do `self._sc_speed_overrides`. Auto, které je naopak PŘED
+  svým místem ve frontě, jen zvolní na `SAFETY_CAR_PACE * SAFETY_CAR_SLOWDOWN` (0,55) -
+  dřív dostalo rychlost 0 a na mapě doslova zaparkovalo uprostřed trati.
 - `get_speed()` při aktivním SC (a jezdec není v pit lane) vrací
   `min(race.get_safety_car_speed(driver), racing_speed(driver, race))` - dohánějící /
   odlapující se auto tedy nikdy nejede rychleji než při normálním závodním tempu.
@@ -364,6 +426,13 @@ se přeskočilo o 8 bodů dopředu (zisk pozice, ne ztráta). Teď:
 - UI: tlačítko BOX u hráčových jezdců je červené (klid) / žluté (pit požadován, čeká na
   vjezd) / zelené (v uličce). Opětovné zadání pitu během průjezdu uličkou se ignoruje.
 
+### Vjezd do boxů při velkém kroku simulace
+`_update_pit()` pouštělo auto do uličky jen když bylo do `PIT_ENTRY_WINDOW` (0,6 bodu) za
+vjezdem. Při velkém kroku simulace (30 FPS + 20x + režim FULL = 0,67 bodu za snímek) auto
+vjezd **přeskočilo**, okno minulo a muselo objet celé kolo navíc. Teď se okno rozšiřuje o
+vzdálenost ujetou v daném snímku (`d <= max(PIT_ENTRY_WINDOW, moved)`), stejná pojistka je u
+Safety Caru zajíždějícího do boxů. Ověřeno pro 30/60/144 FPS × 4x/20x × SHORT/FULL.
+
 ## Panel pit stopu ("Boxová zeď") + rádio
 - Tlačítko BOX u hráčova jezdce **neobjednává pit rovnou**, otevře panel `_draw_pit_panel()`
   (stav `pit_panel_open`; dřívější malý výběr gum `show_tire_select` je pryč). Panel jde
@@ -387,6 +456,10 @@ se přeskočilo o 8 bodů dopředu (zisk pozice, ne ztráta). Teď:
   varování do konzole), titulek se ukáže vždy. Hláška se losuje jen z těch, které mají soubor -
   jinak by při jediné nahrávce půlka pit stopů proběhla potichu. Krátké zvuky jdou přes `pygame.mixer.Sound` (`load_sfx`, cache), takže
   nepřeruší komentář / zvuk výhry přes `mixer.music`.
+- **Tempo jezdce** (PUSH / NEUTRAL / SAVE) je v panelu pod kartami gum
+  (`pit_panel_pace_buttons`), platí okamžitě po kliknutí - nezávisle na pit stopu - a
+  promítá se do `racing_speed()` i do opotřebení gum. V závodě je zvolené tempo vidět v
+  kartě jezdce pod mapou. Panel je kvůli tomu vyšší (`px, py, pw, ph = 410, 60, 1100, 960`).
 - **Tempo směsí**: `TIRES[...]["speed"]` (SOFT 1.010, MEDIUM 1.000, HARD 0.990, INTER 0.985,
   WET 0.975) násobí rychlost v `racing_speed()` (= základ auta × opotřebení × tempo směsi ×
   přilnavost). Rozdíl SOFT-HARD 2 % je vyvážený ztrátou času na dalších zastávkách (SOFT stint ~9.5
@@ -423,6 +496,14 @@ se přeskočilo o 8 bodů dopředu (zisk pozice, ne ztráta). Teď:
   emoji (v herním fontu se kreslily jako čtverečky) a už nepřekrývají "Championship
   standings".
 
+### Kalibrace počasí (opraveno)
+Dřív se losovalo každé 4 kola s 12% šancí CLOUD->RAIN: **pršelo v 5 z 8 závodů** a přezouvání
+na inter a zpátky dělalo polovinu všech pit stopů. Reálně prší zhruba v jednom závodě z pěti.
+Teď `WEATHER_CHANGE_LAPS = 8` a mírnější tabulka (`SUN->CLOUD` 0,18, `CLOUD->RAIN` 0,14,
+`RAIN->RAIN` 0,50). Monte Carlo (20 000 závodů): **~20 % závodů s deštěm**, déšť pak drží
+~14 kol. Skript na doladění: `tune_weather.py` ve scratchpadu (rychlá simulace jen Markovova
+řetězce, bez celého závodu).
+
 ## Testovací režim (dočasný, v Nastavení)
 Slouží k ručnímu zkoušení nových věcí bez odjetí celého závodu. V Nastavení tlačítko
 ZAP/VYP a volba počtu kol (`TEST_MODE_LAP_OPTIONS` = 3 / 5 / 10, výchozí `TEST_MODE_LAPS` = 5;
@@ -440,6 +521,26 @@ kliknutí na počet kol režim rovnou zapne).
   `test_lap_buttons`), štítek v hlavičce a klíče `TEST MODE*`/`ON`/`OFF` v `TEXTS`.
 - Vedlejší oprava: tlačítko Celá obrazovka v Nastavení dřív neexistovalo (`fullscreen_rect`
   zůstávalo `None`, přepínalo jen F11) - teď se kreslí ("ZOBRAZENÍ").
+
+## Ukládání a načítání (opraveno)
+Čtyři chyby najednou:
+- **`load_game()` obnovilo jezdce a hned nato je `_load_race()` přepsalo** - z uložené hry se
+  reálně načetly jen body v šampionátu a závod začal znovu od formačního kola. Teď je pořadí
+  obrácené: `_load_race()` (trať, počet kol, mapa, reset) **a až potom** se nasype uložený
+  stav. Ukládá se navíc `race_phase`, `race_start_time`, název tratě a u jezdců i stav boxů,
+  pozice na roštu, forma a `stint_extension`. Starší savy se načtou taky (chybějící klíče
+  mají rozumné výchozí hodnoty, fáze se odvodí z odjetých kol).
+- **`championship_round` se nikdy nezvyšoval** - všechny savy se jmenovaly `Round0` a v
+  seznamu svítilo "Kolo 0". Nastavuje se v `_load_race()` na `current_race_index + 1`.
+- **`list_saves()` četlo `current_track_name`, které se nikdy neukládalo** - v seznamu byla
+  vždy "Neznámá". Teď se ukládá; u starých savů se název vytáhne z názvu souboru.
+- **Klávesy v seznamu savů byly mrtvý kód** - obsluha ↑/↓/Enter byla vnořená ve větvi pro
+  KLIK MYŠÍ (`if event.type == pygame.MOUSEBUTTONDOWN:` → uvnitř `if event.type ==
+  pygame.KEYDOWN:`), takže se nikdy neprovedla; fungovalo jen ESC. A Enter navíc volal
+  `load_game(slot=1)`, tj. načetl vždy NEJNOVĚJŠÍ save slotu 1, ne ten vybraný v seznamu.
+  Teď je obsluha ve větvi KEYDOWN, `_load_selected_save()` načítá vybraný soubor
+  (`load_game_file`) a řádky seznamu jdou i klikat myší (první klik vybere, druhý načte).
+- Test: `test_saveload.py` ve scratchpadu - ukládá do dočasné složky, NIKDY do `saves/`.
 
 ## Výsledkové okno po závodě
 Po skončení závodu (`race_finished`) `draw()` místo běžného závodního UI kreslí
@@ -569,16 +670,24 @@ startovací audio komentář (CS/EN), plná lokalizace CS/EN/IT, ukládání/na�
 auto-save po závodě, in-game menu (ESC), Settings (FPS, Race Length, Language).
 
 ## TODO priority
-**Vysoká:** žádná otevřená (viz opravy výše).
-**Plánováno uživatelem:** kvalifikace - až bude hotová, nahradí `random.shuffle` startovního
-roštu (viz "Formační kolo") a bude rozhodovat o `grid_position`/`formation_start_delay`.
-**Střední:** doplnit chybějící překlady hardcoded textů (např. "ULOŽENÉ HRY"); pit stopy: double-stack (oba jezdci týmu se dvěma auty v boxu naráz
-nečekají na sebe), v uličce se nekontroluje kolize aut; počasí: bez předpovědi.
-**Střední (k ověření s uživatelem):** `load_game()` obnoví jezdce (kola, pozice, gumy...) a hned
-potom zavolá `_load_race()`, které je celé resetuje - reálně se tedy načte jen šampionát
-(body, kolo sezóny) a závod začne znovu formačním kolem. Nejspíš to není záměr (uložení
-během závodu ukládá i pozice), ale chování se nezměnilo - nejdřív zjistit, co uživatel chce.
-**Nízká:** Practice mode (zatím prázdný); další jazyky (DE...).
+**Čeká na rozhodnutí uživatele (viz "Race mode"):**
+1. Obrácené názvy SHORT/FULL. Nejmenší oprava = prohodit hodnoty `time_compression`
+   (SHORT 1.0, FULL 0.35); čistší = doplnit reálné délky kol (`TRACK_LENGTH_KM` už existuje)
+   a ze SHORT/FULL udělat volbu DÉLKY závodu (25/50/100 % kol) jako v ostatních F1 hrách.
+2. Kvalifikace. Změřeno: s náhodným roštem vyhraje nejrychlejší vůz **0 z 14** závodů
+   (průměrně vyhrává 6. nejrychlejší); když se rošt seřadí podle tempa, vyhraje **5 ze 14**
+   a průměrné pořadí vítěze je 2,0 - přesně jako v reálu. Kvalifikace je tedy jediná věc,
+   která chybí k tomu, aby výsledky dávaly smysl. Až bude, nahradí `random.shuffle` v
+   `_load_race()`.
+
+**Střední:** doplnit chybějící překlady hardcoded textů; pit stopy: double-stack (oba jezdci
+týmu se dvěma auty v boxu naráz nečekají na sebe), v uličce se nekontroluje kolize aut;
+počasí: bez předpovědi; `saves/` roste donekonečna (auto-save po každém závodě, nic se
+nemaže) a není v `.gitignore`.
+
+**Nízká:** Practice mode (zatím prázdný); další jazyky (DE...); `cover2.py` je stará verze
+hry (74 KB) vedle `manager.py` - patřila by do archivu; kořenový `tracks.py` (mimo
+`F1_Manager/`) je taky mrtvá starší verze dat tratí.
 
 ## Styl práce
 - Vždy nejdřív přečíst aktuální `manager.py` před úpravou (mění se často mimo session).
