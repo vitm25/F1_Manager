@@ -193,11 +193,23 @@ TEXTS = {
 
     # Nastavení
     "DÉLKA ZÁVODU": {"CS": "DÉLKA ZÁVODU", "EN": "RACE LENGTH", "IT": "DURATA DELLA GARA"},
-    "SHORT RACE": {"CS": "SHORT RACE", "EN": "SHORT RACE", "IT": "GARA BREVE"},
-    "FULL RACE (1h30+)": {"CS": "FULL RACE (1h30+)", "EN": "FULL RACE (1h30+)", "IT": "GARA COMPLETA (1H30+)"},
+    "SHORT RACE": {"CS": "KRÁTKÝ (30 % kol)", "EN": "SHORT (30 % laps)", "IT": "BREVE (30 % giri)"},
+    "FULL RACE (1h30+)": {"CS": "PLNÝ (100 % kol)", "EN": "FULL (100 % laps)", "IT": "COMPLETA (100 % giri)"},
+    "RACE LENGTH HINT": {"CS": "Tempo je vždy reálné (kolo 68-108 s). Krátký ≈ 25 min, plný ≈ 80 min závodu.",
+                         "EN": "Pace is always realistic (lap 68-108 s). Short ≈ 25 min, full ≈ 80 min per race.",
+                         "IT": "Il ritmo è sempre reale (giro 68-108 s). Breve ≈ 25 min, completa ≈ 80 min."},
     "JAZYK": {"CS": "JAZYK", "EN": "LANGUAGE", "IT": "LINGUA"},
     "FRAMERATE (FPS)": {"CS": "FRAMERATE (FPS)", "EN": "FRAMERATE (FPS)", "IT": "FREQUENZA DEI FRAME"},
     "BACK": {"CS": "ZPĚT", "EN": "BACK", "IT": "INDIETRO"},
+    "QUALIFYING": {"CS": "KVALIFIKACE", "EN": "QUALIFYING", "IT": "QUALIFICHE"},
+    "QUALI ELIMINATED": {"CS": "vypadává", "EN": "eliminated", "IT": "eliminati"},
+    "QUALI OUT IN": {"CS": "vypadl v", "EN": "out in", "IT": "fuori in"},
+    "QUALI POLE": {"CS": "POLE POSITION", "EN": "POLE POSITION", "IT": "POLE POSITION"},
+    "QUALI SKIP": {"CS": "PŘESKOČIT (mezerník)", "EN": "SKIP (space)", "IT": "SALTA (spazio)"},
+    "QUALI TO RACE": {"CS": "NA STARTOVNÍ ROŠT", "EN": "TO THE GRID", "IT": "ALLA GRIGLIA"},
+    "QUALI NO TIME": {"CS": "bez času", "EN": "no time", "IT": "senza tempo"},
+    "QUALI OUT": {"CS": "VYPADL", "EN": "OUT", "IT": "FUORI"},
+    "QUALI GRID": {"CS": "STARTOVNÍ ROŠT", "EN": "STARTING GRID", "IT": "GRIGLIA DI PARTENZA"},
     "SAVE LIST": {"CS": "ULOŽENÉ HRY", "EN": "SAVED GAMES", "IT": "PARTITE SALVATE"},
     "NO SAVES": {"CS": "Žádné uložené hry...", "EN": "No saved games...", "IT": "Nessuna partita salvata..."},
     "SAVE LIST HELP": {"CS": "šipky = výběr | ENTER nebo klik = načíst | ESC = zpět",
@@ -288,9 +300,10 @@ def recommended_tire(race, driver):
     if race.track_wetness >= AI_INTER_WETNESS:
         return "INTER"
     remaining = race.current_track["laps"] - driver.current_lap
-    if remaining <= 11:
+    factor = getattr(race, "distance_factor", 1.0)
+    if remaining <= 11 * factor:
         return "SOFT"
-    if remaining <= 17:
+    if remaining <= 17 * factor:
         return "MEDIUM"
     return "HARD"
 
@@ -439,7 +452,7 @@ TIRES = {
 
 # Opotřebení za JEDNO dojeté kolo při NEUTRAL tempu (viz update() - škáluje se
 # skutečně ujetou vzdáleností, ne uplynulým časem, takže je stejné na všech tratích
-# i při libovolném time_scale/time_compression). Hodnoty jsou kalibrované tak, aby
+# i při libovolném time_scale). Hodnoty jsou kalibrované tak, aby
 # guma dosáhla 100 % opotřebení zhruba v 1.4× průměrné délky stintu, kterou plánuje
 # ai_plan_stint() (SOFT ~9.5, MEDIUM ~14, HARD ~21, INTER ~8, WET ~7 kol) - takže
 # se běžně piťuje podle plánu (target_stint_end) a práh tire_wear > 0.88 slouží jen
@@ -582,7 +595,8 @@ class Driver: # jezdec
         self.ai_decision_timer = 0.0
         
         self.base_speed = driver_base_speed(base_lap_time)
-        self.race_form = 1.0          # forma v jednom závodě, losuje se v _load_race
+        self.race_form = 1.0          # forma na víkend, losuje se v _start_qualifying
+        self.quali_form = 1.0         # jak se jezdci daří v kvalifikaci
         self.overtake_skill = random.uniform(0.8, 1.2)
 
         self.drs_active = False
@@ -661,11 +675,10 @@ def get_speed(driver, race, delta_time=None):
         # není úměrný reálné délce okruhu, proto se z něj čas nedá odvodit.
         path_len = len(race.current_track["racing_line"])
         pace = path_len / formation_lap_duration(race.current_track)
-        # O pár řádků výš v update() se `speed *= time_compression` - to by jinak
-        # znamenalo, že SHORT/FULL mód mění i délku formačního kola. Formační kolo
-        # má trvat vždy stejně dlouho v reálném čase bez ohledu na zvolený režim
-        # závodu, proto se tu dělení time_compression předem "vyruší".
-        pace /= getattr(race, 'time_compression', 1.0)
+        # V `_frame_speeds` se rychlost násobí `speed_scale` (bodů za race-sekundu při
+        # referenčním tempu) - tady se to předem vydělí, aby formační kolo trvalo přesně
+        # `formation_lap_duration()` bez ohledu na trať i na zvolenou délku závodu.
+        pace /= getattr(race, 'speed_scale', 1.0)
 
         if delta_time is None or delta_time <= 0:
             # Volání mimo hlavní smyčku (handle_battles apod.) - formace tam navíc
@@ -686,7 +699,7 @@ def get_speed(driver, race, delta_time=None):
     speed = racing_speed(driver, race)
 
     if driver.in_pit:
-        speed *= 0.4
+        speed *= PIT_LANE_SPEED_FACTOR
 
     if driver.drs_active and not race.safety_car_active:
         speed *= 1.15
@@ -696,9 +709,11 @@ def get_speed(driver, race, delta_time=None):
 # === PIT STOPY ===
 # Auto po žádosti o pit (hráč tlačítkem BOX, AI strategií) dojede k vjezdu do boxové
 # uličky, projede ji sníženou rychlostí (viz get_speed: in_pit = 0.4x), ZASTAVÍ u boxu
-# svého týmu na PIT_TIME (v "komprimovaných" sekundách, tj. při SHORT módu se dělí
-# time_compression - stejný podíl kola v obou režimech), vymění gumy a odjede zpět na trať.
-PIT_TIME = 5.0
+# svého týmu na PIT_TIME (race-sekundy = reálné sekundy), vymění gumy a odjede zpět na trať.
+# Celková ztráta = stání + pomalý průjezd uličkou (PIT_LANE_SPEED_FACTOR) oproti jízdě po
+# trati; kalibrováno na reálných ~20 s.
+PIT_TIME = 2.5
+PIT_LANE_SPEED_FACTOR = 0.30   # rychlost v uličce vůči závodnímu tempu (limit 80 km/h)
 PIT_LANE_LENGTH_M = 400.0    # reálná délka boxové uličky - z ní se dopočítá počet bodů racing_line
 PIT_LANE_OFFSET_PX = 28.0    # o kolik pixelů (zdrojové souřadnice mapy) je ulička vedle trati
 PIT_LANE_BLEND = 0.6         # na kolika bodech trati se auto odklání do uličky / vrací zpět
@@ -721,6 +736,59 @@ TRACK_LENGTH_KM = {
     "Brazil": 4.309, "Las Vegas": 6.201, "Qatar": 5.419, "Abu Dhabi": 5.281,
 }
 FORMATION_LAP_DURATION_FALLBACK = 125.0  # pro trať, která není v TRACK_LENGTH_KM
+
+# === DÉLKA ZÁVODNÍHO KOLA (race-sekundy) ===
+# Kolik sekund trvá jedno kolo vozu s referenčním tempem (base_speed 1.0). Hodnoty odpovídají
+# ZÁVODNÍMU tempu skutečné F1 (ne kvalifikaci), takže plný závod vyjde na 75-100 minut jako
+# v realitě. DŘÍV se délka kola odvozovala z počtu bodů `racing_line` (39-80 podle toho, kolik
+# jich bylo ručně naklikáno) - Monza tak měla nejkratší kolo z celého kalendáře, přestože je
+# ve skutečnosti mezi delšími. Stejný problém mělo kdysi formační kolo a řešil se stejně.
+RACE_LAP_SECONDS = {
+    "Australia": 80.0, "China": 95.0, "Japan": 92.0, "Bahrain": 95.0,
+    "Saudi Arabia": 92.0, "Miami": 92.0, "Imola": 80.0, "Monaco": 75.0,
+    "Canada": 76.0, "Spain": 78.0, "Austria": 68.0, "Silverstone": 90.0,
+    "Hungary": 80.0, "Belgium": 108.0, "Netherlands": 73.0, "Monza": 84.0,
+    "Azerbaijan": 105.0, "Singapore": 95.0, "USA": 97.0, "Mexico": 81.0,
+    "Brazil": 73.0, "Las Vegas": 96.0, "Qatar": 86.0, "Abu Dhabi": 88.0,
+}
+RACE_LAP_SECONDS_FALLBACK = 90.0
+
+# Délka závodu podle režimu = PODÍL kol z plné distance (jako "race distance" v jiných F1
+# hrách). Tempo je v obou režimech stejné a reálné, liší se jen počet kol - dřív byl rozdíl
+# v rychlosti a "SHORT" byl kvůli tomu 2,9x DELŠÍ než "FULL".
+RACE_DISTANCE = {"SHORT": 0.30, "FULL": 1.0}
+MIN_RACE_LAPS = 5
+
+# Krátký závod má být ZHUŠTĚNÝ plný závod, ne jen useknutý: opotřebení gum, délky stintů,
+# četnost nehod i tempo změn počasí se přepočítají poměrem `distance_factor`, takže na 30 %
+# kol zažije hráč stejný počet pit stopů, safety carů i přeháněk jako v plném závodě.
+# (Bez toho vycházelo v 18kolovém závodě 0,2 pit stopu a 0,2 SC na celé pole.)
+
+
+# === KVALIFIKACE (Q1 / Q2 / Q3) ===
+# Kvalifikační kolo je rychlejší než závodní (prázdná nádrž, nové měkké gumy, maximální
+# tempo). Pořadí z kvalifikace určuje startovní rošt - dřív se losoval náhodně, což znamenalo,
+# že nejrychlejší vůz nevyhrál ani jeden z 14 testovacích závodů.
+QUALI_LAP_FACTOR = 0.93        # kvalifikační kolo vůči závodnímu tempu
+QUALI_LAP_NOISE = 0.005        # rozptyl mezi jednotlivými koly stejného jezdce
+QUALI_FORM_SPREAD = 0.004      # jak moc se jezdci daří celá kvalifikace
+QUALI_SEGMENTS = (             # (název, kolik jezdců postoupí dál, délka v reálných sekundách)
+    ("Q1", 15, 16.0),
+    ("Q2", 10, 14.0),
+    ("Q3", 0, 12.0),
+)
+QUALI_RUNS = (2, 3)            # kolik kol jezdec v segmentu zajede (náhodně v rozsahu)
+
+
+def format_lap_time(seconds):
+    """Kolo jako 1:18.532 (kvalifikační časy)."""
+    minutes, secs = divmod(seconds, 60)
+    return f"{int(minutes)}:{secs:06.3f}"
+
+
+def race_lap_seconds(track):
+    """Délka jednoho závodního kola dané tratě v race-sekundách (referenční tempo)."""
+    return RACE_LAP_SECONDS.get(track.get("name"), RACE_LAP_SECONDS_FALLBACK)
 
 
 def formation_lap_duration(track):
@@ -805,7 +873,7 @@ def pit_box_distance(geometry, team_index, team_count, slot):
 # === STARTOVNÍ SEMAFOR (po formačním kole) ===
 # Jako ve skutečné F1: 5 červených světel se rozsvěcí po jednom v 1s intervalech,
 # pak náhodná prodleva a všechna světla naráz zhasnou = start závodu. Časuje se v
-# REÁLNÝCH sekundách (nezávisle na time_scale/time_compression), aby sekvence vypadala
+# REÁLNÝCH sekundách (nezávisle na time_scale), aby sekvence vypadala
 # vždy stejně; při pauze stojí.
 START_LIGHTS_COUNT = 5
 START_LIGHT_INTERVAL = 1.0      # s mezi rozsvícením dvou světel
@@ -821,7 +889,7 @@ START_NO_BATTLE_SECONDS = 8.0
 # === SOUBOJE O POZICI (handle_battles) ===
 # Všechno je v PODÍLU KOLA, ne v sekundách ani snímcích. Důvod: "sekunda" znamená na každé
 # trati a v každém režimu něco jiného (kolo trvá 39-230 race-sekund podle počtu bodů
-# racing_line a time_compression), takže šance zadaná na sekundu dávala na dlouhém kole
+# tratě), takže šance zadaná na sekundu dávala na dlouhém kole
 # mnohonásobně víc soubojů. Podíl kola je stejný všude.
 # Kalibrace: reálná F1 má ~40-60 předjetí na závod, tj. zhruba 1 na kolo pro celé pole.
 # AI strategie: jak často se AI rozhoduje a jaké jsou šance na undercut/overcut. Všechno
@@ -859,7 +927,7 @@ OVERTAKE_JUMP_LAPS = 0.004         # o kolik před obránce se předjíždějíc
 OVERTAKE_BLUE_FLAG_RATE_PER_LAP = 8.0   # doháněné auto (o kolo vzadu) pustí soupeře skoro hned
 
 # === VIRTUÁLNÍ SAFETY CAR ===
-VSC_PACE = 0.65              # společné tempo pole pod VSC (body racing_line/s před time_compression)
+VSC_PACE = 0.60              # tempo pole pod VSC jako PODÍL závodního tempa
 VSC_MIN_LAPS = 0.5           # délka VSC v kolech (náhodně v rozsahu)
 VSC_MAX_LAPS = 1.5
 
@@ -878,14 +946,14 @@ DRS_FIRST_LAP = 3        # DRS se povoluje až od 3. kola (jako ve F1 - první d
 DRS_ZONE_MARGIN = 0.5    # o kolik bodů kolem zóny se DRS ještě počítá (zóny jsou hrubě klikané)
 
 # === SAFETY CAR – seřazování do vláčku ===
-SAFETY_CAR_PACE = 0.34             # základní rychlost SC a aut, která už jsou ve frontě (body/s)
+SAFETY_CAR_PACE = 0.65             # tempo SC (a aut ve frontě) jako PODÍL závodního tempa
 SAFETY_CAR_LEADER_GAP = 2.5        # cílový odstup lídra od SC (ve stejných jednotkách jako track_index)
 SAFETY_CAR_CAR_GAP = 1.6           # cílový odstup mezi jednotlivými auty ve frontě
 SAFETY_CAR_MAX_CATCHUP_TIME = 25.0  # i auto ztracené o celé kolo dožene frontu nejpozději za tolik sekund
 SAFETY_CAR_LINEUP_TOLERANCE = 2.0  # největší dovolená mezera od cílové pozice, aby se pole považovalo za seřazené
 SAFETY_CAR_SLOWDOWN = 0.55         # jak zpomalí auto, které je před svým místem ve frontě (0 = zastaví)
 # SC vyjíždí z boxové uličky a na konci do ní zase zajíždí (fáze WAITING -> LEADING -> ENDING -> PITTING):
-SAFETY_CAR_WAIT_SPEED = 0.6        # tempo všech aut, než SC vyjede z boxů (stejné pro všechny = zachová rozestupy)
+SAFETY_CAR_WAIT_SPEED = 0.60       # tempo všech aut, než SC vyjede z boxů (podíl závodního tempa)
 SAFETY_CAR_JOIN_DISTANCE = 8.0     # SC vyjede z uličky, až je lídr tolik bodů před jejím koncem
 SAFETY_CAR_EXIT_RUN = 1.2          # SC čeká kousek před koncem uličky (aby se plynule zařadil na trať)
 
@@ -1066,7 +1134,8 @@ def ai_plan_stint(driver, race):
     if driver.planned_stops == 1:          # 1-stop = delší stinty
         modifier *= 1.25
     
-    driver.target_stint_end = driver.current_lap + int(base_stint * modifier)
+    modifier *= getattr(race, "distance_factor", 1.0)    # kratší závod = úměrně kratší stinty
+    driver.target_stint_end = driver.current_lap + max(2, int(base_stint * modifier))
     driver.current_stint_laps = 0
     driver.stint_extension = 0
     print(f"🧠 {driver.name} plánuje stint do kola {driver.target_stint_end} ({tire})")
@@ -1095,7 +1164,7 @@ def ai_should_pit(driver, race):
         driver.next_tire = ai_choose_tire(driver, race)
         return True
 
-    if driver.current_lap - driver.last_pit_lap < 6:
+    if driver.current_lap - driver.last_pit_lap < max(2, 6 * getattr(race, "distance_factor", 1.0)):
         return False
 
     # Základní podmínky
@@ -1299,6 +1368,14 @@ class ChampionshipScreen(Screen):
         self.start_lights_out_timer = 0.0        # jak dlouho ještě ukazovat "světla zhasla"
         self.race_start_time = 0.0               # race_time, kdy zhasla světla
 
+        # === KVALIFIKACE ===
+        self.quali = None              # stav probíhající kvalifikace (viz _start_qualifying)
+        self.quali_grid = []           # výsledný rošt (jména jezdců) pro nejbližší závod
+        self.quali_round = -1          # pro který závod v kalendáři rošt platí
+        self.form_round = -1           # pro který závod je vylosovaná forma jezdců
+        self.quali_skip_button = None
+        self.quali_race_button = None
+
     def _initialize_championship(self):
         self.teams = {}
         self.drivers = []
@@ -1312,46 +1389,294 @@ class ChampionshipScreen(Screen):
             team = Team(team_name, team_drivers, team_data["color"])
             self.teams[team_name] = team
 
+    TRACK_MAPPING = {
+        "Australian GP": "Australia", "Chinese GP": "China", "Japanese GP": "Japan",
+        "Bahrain GP": "Bahrain", "Saudi Arabian GP": "Saudi Arabia", "Miami GP": "Miami",
+        "Emilia Romagna GP": "Imola", "Monaco GP": "Monaco", "Spanish GP": "Spain",
+        "Canadian GP": "Canada", "Austrian GP": "Austria", "British GP": "Silverstone",
+        "Belgian GP": "Belgium", "Hungarian GP": "Hungary", "Dutch GP": "Netherlands",
+        "Italian GP": "Monza", "Azerbaijan GP": "Azerbaijan", "Singapore GP": "Singapore",
+        "United States GP": "USA", "Mexico City GP": "Mexico", "São Paulo GP": "Brazil",
+        "Las Vegas GP": "Las Vegas", "Qatar GP": "Qatar", "Abu Dhabi GP": "Abu Dhabi",
+    }
+
+    def track_for_round(self, race_index):
+        """Trať pro dané kolo kalendáře - sdílí ji kvalifikace i závod."""
+        if race_index >= len(CALENDAR_2025):
+            return None
+        track_name = self.TRACK_MAPPING.get(CALENDAR_2025[race_index]["name"])
+        track = next((t for t in tracks if t["name"] == track_name), None)
+        if not track and tracks:
+            track = tracks[race_index % len(tracks)]
+        return track
+
+    # ==================== KVALIFIKACE ====================
+    def _start_qualifying(self):
+        """Připraví kvalifikaci pro nejbližší závod: Q1 (20 aut) -> Q2 (15) -> Q3 (10).
+
+        Forma jezdců na víkend se losuje TADY (ne až v `_load_race`), aby kvalifikace i závod
+        jely se stejnými hodnotami - kdo je v kvalifikaci rychlý, je rychlý i v závodě."""
+        track = self.track_for_round(self.current_race_index)
+        if track is None:
+            return False
+        self.current_track = track
+        self.state = "QUALIFYING"
+
+        for driver in self.drivers:
+            driver.race_form = 1.0 + random.uniform(-RACE_FORM_SPREAD, RACE_FORM_SPREAD)
+            driver.quali_form = random.gauss(1.0, QUALI_FORM_SPREAD)
+        self.form_round = self.current_race_index
+
+        self.quali = {
+            "segment": 0,
+            "timer": 0.0,
+            "active": [d.name for d in self.drivers],     # kdo v tomhle segmentu jede
+            "times": {},                                  # nejlepší čas v aktuálním segmentu
+            "final": {},                                  # nejlepší čas z posledního segmentu jezdce
+            "order": [],                                  # výsledné pořadí (od pole position)
+            "out_in": {},                                 # ve kterém segmentu jezdec vypadl
+            "runs": {},                                   # naplánované okamžiky kol
+            "done": False,
+            "last_improved": None,
+        }
+        self._schedule_quali_runs()
+        print(f"🏁 KVALIFIKACE - {track['name']}")
+        return True
+
+    def _schedule_quali_runs(self):
+        """Rozvrhne, kdy během segmentu který jezdec zajede měřené kolo."""
+        q = self.quali
+        duration = QUALI_SEGMENTS[q["segment"]][2]
+        q["runs"] = {}
+        for name in q["active"]:
+            count = random.randint(*QUALI_RUNS)
+            q["runs"][name] = sorted(random.uniform(0.12, 0.93) * duration for _ in range(count))
+        q["times"] = {}
+        q["timer"] = 0.0
+
+    def _quali_lap_time(self, driver):
+        """Čas jednoho měřeného kola: tempo vozu + forma + náhoda mezi koly."""
+        base = race_lap_seconds(self.current_track) * QUALI_LAP_FACTOR
+        pace = driver.base_speed * driver.race_form * getattr(driver, "quali_form", 1.0)
+        return base / max(0.5, pace) * random.gauss(1.0, QUALI_LAP_NOISE)
+
+    def _update_qualifying(self, real_delta_time):
+        """Běh kvalifikace v reálném čase (nezávisle na time_scale)."""
+        q = self.quali
+        if not q or q["done"]:
+            return
+        name_to_driver = {d.name: d for d in self.drivers}
+        duration = QUALI_SEGMENTS[q["segment"]][2]
+        q["timer"] += real_delta_time
+
+        for name, runs in q["runs"].items():
+            while runs and runs[0] <= q["timer"]:
+                runs.pop(0)
+                driver = name_to_driver.get(name)
+                if driver is None:
+                    continue
+                lap = self._quali_lap_time(driver)
+                if name not in q["times"] or lap < q["times"][name]:
+                    q["times"][name] = lap
+                    q["last_improved"] = name
+
+        if q["timer"] >= duration:
+            self._finish_quali_segment()
+
+    def _finish_quali_segment(self):
+        """Uzavře segment: seřadí časy, vyřadí nejpomalejší a spustí další segment."""
+        q = self.quali
+        advancing_count = QUALI_SEGMENTS[q["segment"]][1]
+        # Kdo nezajel čas, jde na konec segmentu
+        ranked = sorted(q["active"], key=lambda n: q["times"].get(n, float("inf")))
+        for name in ranked:
+            if name in q["times"]:
+                q["final"][name] = q["times"][name]
+
+        if advancing_count and len(ranked) > advancing_count:
+            advancing, eliminated = ranked[:advancing_count], ranked[advancing_count:]
+        else:
+            advancing, eliminated = ranked, []
+
+        # Vyřazení se řadí až za ty, kdo postoupili (Q3 nahoře, pak Q2, pak Q1)
+        for name in eliminated:
+            q["out_in"][name] = QUALI_SEGMENTS[q["segment"]][0]
+        q["order"] = eliminated + q["order"]
+
+        if advancing_count == 0 or not advancing:
+            q["order"] = advancing + q["order"]
+            q["done"] = True
+            self.quali_grid = list(q["order"])
+            self.quali_round = self.current_race_index
+            pole = self.quali_grid[0] if self.quali_grid else "?"
+            print(f"🏁 POLE POSITION: {pole} ({format_lap_time(q['final'].get(pole, 0))})")
+        else:
+            q["segment"] += 1
+            q["active"] = advancing
+            self._schedule_quali_runs()
+
+    def _skip_qualifying(self):
+        """Dojede zbytek kvalifikace okamžitě (tlačítko / mezerník)."""
+        guard = 0
+        while self.quali and not self.quali["done"] and guard < 10:
+            guard += 1
+            for name, runs in self.quali["runs"].items():
+                self.quali["runs"][name] = []
+                driver = next((d for d in self.drivers if d.name == name), None)
+                if driver is None:
+                    continue
+                for _ in range(random.randint(*QUALI_RUNS)):
+                    lap = self._quali_lap_time(driver)
+                    if name not in self.quali["times"] or lap < self.quali["times"][name]:
+                        self.quali["times"][name] = lap
+            self._finish_quali_segment()
+
+    def _quali_rows(self):
+        """Řádky tabulky: (pozice, jezdec, čas, odstup, stav)."""
+        q = self.quali
+        rows = []
+        if q["done"]:
+            for i, name in enumerate(q["order"], 1):
+                rows.append((i, name, q["final"].get(name), None, q["out_in"].get(name, "GRID")))
+            best = q["final"].get(q["order"][0]) if q["order"] else None
+            return [(i, n, t, (t - best) if (t and best and i > 1) else None, s) for i, n, t, _, s in rows]
+
+        ranked = sorted(q["active"], key=lambda n: q["times"].get(n, float("inf")))
+        best = q["times"].get(ranked[0]) if ranked and ranked[0] in q["times"] else None
+        advancing_count = QUALI_SEGMENTS[q["segment"]][1]
+        for i, name in enumerate(ranked, 1):
+            t = q["times"].get(name)
+            gap = (t - best) if (t is not None and best is not None and i > 1) else None
+            out = bool(advancing_count) and i > advancing_count
+            rows.append((i, name, t, gap, "OUT" if out else "IN"))
+        # pod aktivní jezdce se vypíšou už vyřazení (v pořadí, v jakém vypadli)
+        for j, name in enumerate(q["order"]):
+            rows.append((len(ranked) + j + 1, name, q["final"].get(name), None, q["out_in"].get(name, "DONE")))
+        return rows
+
+    def _draw_qualifying(self, screen):
+        q = self.quali
+        screen.blit(get_carbon_background(), (0, 0))
+        seg_name, advancing, duration = QUALI_SEGMENTS[q["segment"]]
+        track_name = self.current_track["name"].upper()
+
+        title = f"{get_text('QUALIFYING')} - {track_name}"
+        screen.blit(self.font_big.render(title, True, (255, 215, 0)), (60, 34))
+        if q["done"]:
+            subtitle = get_text("QUALI GRID")
+            color = (0, 230, 120)
+        else:
+            out_from = advancing + 1 if advancing else 0
+            subtitle = f"{seg_name}" + (f"   ({get_text('QUALI ELIMINATED')} {out_from}-{len(q['active'])})"
+                                        if advancing else f"   ({get_text('QUALI POLE')})")
+            color = (255, 150, 60)
+        screen.blit(self.font.render(subtitle, True, color), (60, 82))
+
+        # ukazatel času segmentu
+        if not q["done"]:
+            bar = pygame.Rect(60, 112, 700, 10)
+            pygame.draw.rect(screen, (40, 40, 60), bar, border_radius=5)
+            frac = max(0.0, min(1.0, 1.0 - q["timer"] / duration))
+            pygame.draw.rect(screen, (255, 150, 60), (bar.x, bar.y, int(bar.width * frac), bar.height), border_radius=5)
+
+        # tabulka
+        rows = self._quali_rows()
+        panel = pygame.Rect(60, 140, 1300, 900)
+        pygame.draw.rect(screen, (16, 16, 28), panel, border_radius=12)
+        pygame.draw.rect(screen, (255, 215, 0), panel, 3, border_radius=12)
+        mine = self.player_team.name if self.player_team else None
+        by_name = {d.name: d for d in self.drivers}
+        y = panel.y + 20
+        for pos, name, t, gap, status in rows[:20]:
+            driver = by_name.get(name)
+            team = self.teams.get(driver.team_name) if driver else None
+            row_rect = pygame.Rect(panel.x + 10, y - 2, panel.w - 20, 40)
+            if driver and team and team.name == mine:
+                pygame.draw.rect(screen, (40, 52, 84), row_rect, border_radius=6)
+            if status == "OUT":
+                pygame.draw.rect(screen, (60, 24, 24), row_rect, border_radius=6)
+            if name == q.get("last_improved") and not q["done"]:
+                pygame.draw.rect(screen, (0, 200, 120), row_rect, 2, border_radius=6)
+
+            screen.blit(self.font.render(f"{pos}.", True, (200, 200, 215)), (panel.x + 24, y + 6))
+            if team:
+                pygame.draw.rect(screen, team.color, (panel.x + 70, y + 4, 6, 28))
+            screen.blit(self.font.render(name, True, team.color if team else (230, 230, 240)), (panel.x + 90, y + 6))
+            time_text = format_lap_time(t) if t else get_text("QUALI NO TIME")
+            screen.blit(self.font.render(time_text, True, (235, 235, 245)), (panel.x + 520, y + 6))
+            if gap:
+                screen.blit(self.font.render(f"+{gap:.3f}", True, (170, 170, 190)), (panel.x + 700, y + 6))
+            if status == "OUT":
+                screen.blit(self.font.render(get_text("QUALI OUT"), True, (240, 110, 110)), (panel.x + 860, y + 6))
+            elif status in ("Q1", "Q2"):
+                label = f"{get_text('QUALI OUT IN')} {status}"
+                screen.blit(self.font_small.render(label, True, (130, 130, 150)), (panel.x + 860, y + 10))
+            elif status == "GRID" and pos <= 10:
+                screen.blit(self.font_small.render("Q3", True, (120, 160, 130)), (panel.x + 860, y + 10))
+            y += 42
+
+        # tlačítka
+        if q["done"]:
+            self.quali_skip_button = None
+            self.quali_race_button = pygame.Rect(1420, 140, 440, 90)
+            hovered = self.quali_race_button.collidepoint(get_mouse_pos())
+            pygame.draw.rect(screen, (110, 225, 130) if hovered else (80, 200, 100), self.quali_race_button, border_radius=10)
+            pygame.draw.rect(screen, (255, 255, 255), self.quali_race_button, 3, border_radius=10)
+            label = self.font_big.render(get_text("QUALI TO RACE"), True, (255, 255, 255))
+            screen.blit(label, label.get_rect(center=self.quali_race_button.center))
+        else:
+            self.quali_race_button = None
+            self.quali_skip_button = pygame.Rect(1420, 140, 440, 90)
+            hovered = self.quali_skip_button.collidepoint(get_mouse_pos())
+            pygame.draw.rect(screen, (60, 60, 90) if hovered else (35, 35, 60), self.quali_skip_button, border_radius=10)
+            pygame.draw.rect(screen, (200, 200, 215), self.quali_skip_button, 3, border_radius=10)
+            label = self.font.render(get_text("QUALI SKIP"), True, (235, 235, 245))
+            screen.blit(label, label.get_rect(center=self.quali_skip_button.center))
+
+        # info panel vpravo
+        info = pygame.Rect(1420, 260, 440, 300)
+        pygame.draw.rect(screen, (16, 16, 28), info, border_radius=12)
+        pygame.draw.rect(screen, (90, 90, 115), info, 2, border_radius=12)
+        lines = [f"{get_text('ROUND')} {self.current_race_index + 1}/{len(CALENDAR_2025)}",
+                 f"{get_text('Kolo')}: {race_lap_seconds(self.current_track):.0f} s"]
+        if self.player_team:
+            lines.append("")
+            lines.append(f"{get_text('Váš tým:')} {self.player_team.name}")
+            for d in self.player_team.drivers:
+                t = q["final"].get(d.name) or q["times"].get(d.name)
+                lines.append(f"  {d.name}: {format_lap_time(t) if t else '-'}")
+        ly = info.y + 20
+        for line in lines:
+            screen.blit(self.font.render(line, True, (220, 220, 235)), (info.x + 20, ly))
+            ly += 32
+
     def _load_race(self):
         if self.current_race_index >= len(CALENDAR_2025):
             print("Sezóna skončila!")
             return
-        
-        calendar_entry = CALENDAR_2025[self.current_race_index]
-        race_name = calendar_entry["name"]
 
-        track_mapping = {
-            "Australian GP": "Australia", "Chinese GP": "China", "Japanese GP": "Japan",
-            "Bahrain GP": "Bahrain", "Saudi Arabian GP": "Saudi Arabia", "Miami GP": "Miami",
-            "Emilia Romagna GP": "Imola", "Monaco GP": "Monaco", "Spanish GP": "Spain",
-            "Canadian GP": "Canada", "Austrian GP": "Austria", "British GP": "Silverstone",
-            "Belgian GP": "Belgium", "Hungarian GP": "Hungary", "Dutch GP": "Netherlands",
-            "Italian GP": "Monza", "Azerbaijan GP": "Azerbaijan", "Singapore GP": "Singapore",
-            "United States GP": "USA", "Mexico City GP": "Mexico", "São Paulo GP": "Brazil",
-            "Las Vegas GP": "Las Vegas", "Qatar GP": "Qatar", "Abu Dhabi GP": "Abu Dhabi",
-        }
-
-        track_name = track_mapping.get(race_name)
-        self.current_track = next((t for t in tracks if t["name"] == track_name), None)
-        if not self.current_track and tracks:
-            self.current_track = tracks[self.current_race_index % len(tracks)]
-
+        self.current_track = self.track_for_round(self.current_race_index)
         if not self.current_track:
             print("CHYBA: Trať nenalezena!")
             return
 
-        # === NASTAVENÍ DÉLKY A RYCHLOSTI ZÁVODU ===
-        original_laps = ORIGINAL_TRACK_LAPS.get(self.current_track["name"], self.current_track.get("laps", 58))
+        # === DÉLKA ZÁVODU A MĚŘÍTKO RYCHLOSTI ===
+        # Tempo je vždy reálné (kolo trvá race_lap_seconds()); režim mění POČET KOL.
+        full_laps = ORIGINAL_TRACK_LAPS.get(self.current_track["name"], self.current_track.get("laps", 58))
+        laps = max(MIN_RACE_LAPS, round(full_laps * RACE_DISTANCE.get(CURRENT_RACE_MODE, 1.0)))
         if TEST_MODE:
-            original_laps = min(original_laps, TEST_MODE_LAPS)   # testovací režim: krátký závod
-        self.current_track["laps"] = original_laps   # oba módy mají plný počet kol
+            laps = min(laps, TEST_MODE_LAPS)   # testovací režim: krátký závod
+        self.current_track["laps"] = laps
 
-        if CURRENT_RACE_MODE == "FULL":
-            self.time_compression = 1.0          # reálný čas
-            print(f"🏎️ FULL RACE - {original_laps} kol | Reálný čas na kolo")
-        else:  # SHORT
-            self.time_compression = 0.35         # výrazně zrychleno (uprav podle chuti)
-            print(f"🏎️ SHORT RACE - {original_laps} kol | Zrychlený čas ({self.time_compression}x)")
+        self.distance_factor = max(0.05, laps / max(1, full_laps))
+        self.form_round = self.current_race_index
+
+        # Kolik bodů racing_line ujede referenční vůz (tempo 1.0) za jednu race-sekundu.
+        # Díky tomu je délka kola daná tratí, ne počtem ručně naklikaných bodů.
+        self.lap_seconds = race_lap_seconds(self.current_track)
+        self.speed_scale = len(self.current_track["racing_line"]) / self.lap_seconds
+        print(f"🏎️ {CURRENT_RACE_MODE} - {laps}/{full_laps} kol | kolo {self.lap_seconds:.0f} s "
+              f"| závod ~{laps * self.lap_seconds / 60:.0f} min")
 
         # Načtení mapy
         try:
@@ -1392,15 +1717,21 @@ class ChampionshipScreen(Screen):
             driver.engine_damage = 0.0
             driver.incident_cooldown = 0.0
             driver.battle_cooldown = 0.0
-            driver.race_form = 1.0 + random.uniform(-RACE_FORM_SPREAD, RACE_FORM_SPREAD)
+            if self.form_round != self.current_race_index:
+                driver.race_form = 1.0 + random.uniform(-RACE_FORM_SPREAD, RACE_FORM_SPREAD)
 
             ai_plan_stint(driver, self)
 
-        # Startovní rošt - DOČASNĚ náhodný (dokud nebude kvalifikace, viz TODO v CLAUDE.md).
-        # self.drivers samotné se nepřehazuje (jinde se neřídí pořadím), jen grid_position a
-        # formation_start_delay - o tom, kdo je na roštu kde, rozhoduje jedině tohle.
-        grid_order = list(self.drivers)
-        random.shuffle(grid_order)
+        # Startovní rošt podle KVALIFIKACE (když proběhla pro tenhle závod), jinak náhodně -
+        # to je záloha např. po načtení uložené hry. self.drivers se nepřehazuje, o roštu
+        # rozhoduje jen grid_position a formation_start_delay.
+        by_name = {d.name: d for d in self.drivers}
+        if self.quali_round == self.current_race_index and self.quali_grid:
+            grid_order = [by_name[n] for n in self.quali_grid if n in by_name]
+            grid_order += [d for d in self.drivers if d not in grid_order]
+        else:
+            grid_order = list(self.drivers)
+            random.shuffle(grid_order)
         for grid_i, driver in enumerate(grid_order):
             driver.grid_position = grid_i
             driver.formation_start_delay = grid_i * FORMATION_GRID_GAP
@@ -1436,7 +1767,7 @@ class ChampionshipScreen(Screen):
         # hry jmenovaly "Round0" a v seznamu savů svítilo "Kolo 0".
         self.championship_round = self.current_race_index + 1
 
-        print(f"✅ {CURRENT_RACE_MODE} režim spuštěn - {original_laps} kol")
+        print(f"✅ {CURRENT_RACE_MODE} režim spuštěn - {laps} kol")
 
     def fuel_burnt(self):
         """0 na startu, 1 v cíli - jak velká část paliva už je spálená (ovlivňuje tempo)."""
@@ -1445,8 +1776,8 @@ class ChampionshipScreen(Screen):
         return max(0.0, min(1.0, leader_lap / max(1, laps)))
 
     def lap_race_seconds(self):
-        """Přibližná délka kola v race_time sekundách (stejná jednotka jako vlhkost trati)."""
-        return len(self.current_track["racing_line"]) / max(0.05, getattr(self, 'time_compression', 1.0))
+        """Délka kola v race-sekundách (stejná jednotka jako `race_time` a odstupy v UI)."""
+        return getattr(self, "lap_seconds", None) or race_lap_seconds(self.current_track)
 
     def finish_race(self):
         if self.race_finished:
@@ -1505,7 +1836,8 @@ class ChampionshipScreen(Screen):
         if self.current_race_index >= len(CALENDAR_2025):
             print("Sezóna skončila!")
             return False
-        self._load_race()
+        self.race_finished = False
+        self._start_qualifying()      # každý závod začíná kvalifikací
         return True
     
     def save_game(self, slot=1):
@@ -1762,6 +2094,10 @@ class ChampionshipScreen(Screen):
         self.paused = True
 
     def update(self, delta_time):
+        if self.state == "QUALIFYING":
+            self._update_qualifying(delta_time)
+            return
+
         self._update_radio(delta_time)   # běží v reálném čase, i když je závod pozastavený
         # Otevřený panel pit stopu závod pozastaví (jako v F1 Manageru)
         if self.paused or self.pit_panel_open or not self.current_track or self.race_finished:
@@ -1776,32 +2112,39 @@ class ChampionshipScreen(Screen):
 
         # Počasí - losuje se podle odjetých kol lídra, ne podle uplynulého reálného
         # času. Jedno kolo trvá desítky až stovky race-time sekund (podle tratě a
-        # time_compression), takže dřívější časový časovač (18s) přehazoval počasí
+        # tratě), takže dřívější časový časovač (18s) přehazoval počasí
         # i 5-10x za jedno kolo (skoro jistý déšť hned na startu).
         leader_lap_for_weather = max(
             (d.current_lap for d in self.drivers if not d.finished and not d.is_dnf),
             default=0,
         )
+        weather_interval = max(1, round(WEATHER_CHANGE_LAPS * self.distance_factor))
         if (leader_lap_for_weather != self.weather_last_check_lap
                 and leader_lap_for_weather > 0
-                and leader_lap_for_weather % WEATHER_CHANGE_LAPS == 0):
+                and leader_lap_for_weather % weather_interval == 0):
             self.weather_last_check_lap = leader_lap_for_weather
             self.current_weather = next_weather(self.current_weather)
 
-        # Vlhkost trati se mění podle "kol" (jedno kolo = path_len / time_compression race-sekund),
-        # takže rychlost mokření/schnutí je stejná na všech tratích i v SHORT/FULL.
+        # Vlhkost trati se mění podle "kol" (délka kola = lap_race_seconds()), takže rychlost
+        # mokření/schnutí je stejná na všech tratích i v obou režimech.
         lap_race_seconds = self.lap_race_seconds()
         frame_laps = delta_time / lap_race_seconds   # kolik "kol" odpovídá tomuto snímku
+        # Pro NÁHODNÉ UDÁLOSTI (nehody, safety car, počasí) se počítá s "kolem plného závodu",
+        # aby jich byl v krátkém závodě stejný počet jako v dlouhém.
+        event_laps = frame_laps / self.distance_factor
         if self.current_weather == "RAIN":
-            self.track_wetness += delta_time / (WETTING_LAPS * lap_race_seconds)
+            wet_laps = WETTING_LAPS * self.distance_factor
+            self.track_wetness += delta_time / (wet_laps * lap_race_seconds)
         else:
-            self.track_wetness -= delta_time / (DRYING_LAPS[self.current_weather] * lap_race_seconds)
+            # DRYING_LAPS má klíče jen SUN a CLOUD - za deště se trať nesuší
+            dry_laps = DRYING_LAPS[self.current_weather] * self.distance_factor
+            self.track_wetness -= delta_time / (dry_laps * lap_race_seconds)
         self.track_wetness = max(0.0, min(1.0, self.track_wetness))
 
         # === SAFETY CAR LOGIKA (jako ve skutečné F1) ===
         if (not self.safety_car_active and self.race_phase == RACE_PHASE_RACING
                 and self.race_time - self.race_start_time > START_NO_BATTLE_SECONDS
-                and random.random() < chance_in(RANDOM_SC_PER_LAP * (1.0 + 1.5 * self.track_wetness), frame_laps)):
+                and random.random() < chance_in(RANDOM_SC_PER_LAP * (1.0 + 1.5 * self.track_wetness), event_laps)):
             self.deploy_safety_car(20, 55)
             print("🚨 SAFETY CAR OUT - Jezdci se seřazují za ním!")
 
@@ -1844,7 +2187,7 @@ class ChampionshipScreen(Screen):
             driver.ai_decision_timer += frame_laps   # v KOLECH, ne v race-sekundách
 
             if self.race_phase == RACE_PHASE_RACING:
-                generate_incident(driver, self, frame_laps)
+                generate_incident(driver, self, event_laps)
 
             # AI rozhodnutí (před startem - formační kolo a semafor - se nepituje ani nemění tempo)
             if (self.race_phase == RACE_PHASE_RACING and
@@ -1882,12 +2225,13 @@ class ChampionshipScreen(Screen):
 
             # Opotřebení kol - škáluje se podle skutečně ujeté vzdálenosti (ne podle
             # uplynulého času), takže je konzistentní napříč tratěmi (různá délka
-            # racing_line) i time_scale/time_compression. `speed * delta_time` je
+            # racing_line) i time_scale. `speed * delta_time` je
             # přesně vzdálenost ujetá tento frame (stejná hodnota, co jde do
             # driver.progress o pár řádků výš).
             lap_fraction = (speed * delta_time) / path_len if path_len else 0.0
             driver.tire_wear += (lap_fraction * PACE[driver.pace_mode]["wear"] * TIRE_WEAR_PER_LAP[driver.tire]
-                                 * tire_wear_weather_factor(driver.tire, self.track_wetness))
+                                 * tire_wear_weather_factor(driver.tire, self.track_wetness)
+                                 / self.distance_factor)   # kratší závod = úměrně rychlejší opotřebení
             driver.tire_wear = min(1.0, driver.tire_wear)
 
             # Pit stop (vjezd do uličky, zastávka u boxu, odjezd)
@@ -1943,7 +2287,7 @@ class ChampionshipScreen(Screen):
             self.finish_race()
 
     def _frame_speeds(self, delta_time, path_len):
-        """Rychlosti všech jezdců pro tenhle snímek (už včetně time_compression).
+        """Rychlosti všech jezdců pro tenhle snímek (v bodech racing_line za race-sekundu).
 
         Kromě běžného `get_speed()` řeší i JÍZDU ZA SOUPEŘEM: auto se k vozu před sebou
         nedostane blíž než FOLLOW_MIN_GAP_LAPS (musí ho nejdřív předjet v handle_battles) a
@@ -1952,8 +2296,8 @@ class ChampionshipScreen(Screen):
 
         Pod Safety Carem, VSC a před startem se nic neomezuje - tam rychlosti řídí jiná
         pravidla. Modré vlajky: auto o kolo vzadu soupeře nebrzdí."""
-        compression = getattr(self, 'time_compression', 1.0)
-        speeds = {id(d): get_speed(d, self, delta_time) * compression for d in self.drivers}
+        scale = self.speed_scale
+        speeds = {id(d): get_speed(d, self, delta_time) * scale for d in self.drivers}
 
         if (self.race_phase != RACE_PHASE_RACING or self.safety_car_active or self.vsc_active):
             return speeds
@@ -2009,7 +2353,7 @@ class ChampionshipScreen(Screen):
                 driver.pit_timer = 0.0
         elif driver.pit_phase == "SERVICE":
             driver.pit_timer += delta_time
-            if driver.pit_timer >= PIT_TIME / getattr(self, 'time_compression', 1.0):
+            if driver.pit_timer >= PIT_TIME:
                 driver.tire = driver.next_tire
                 driver.tire_wear = 0.0
                 driver.current_stint_laps = 0
@@ -2231,7 +2575,7 @@ class ChampionshipScreen(Screen):
             pace = (TIRES[tire]["speed"] - 1.0) * 100
             pace_text = f"{pace:+.1f} %" if abs(pace) > 0.05 else "0.0 %"
             pace_color = (0, 220, 110) if pace > 0.05 else (255, 190, 0) if pace > -1.2 else (230, 70, 70)
-            life = int(round(1 / TIRE_WEAR_PER_LAP[tire]))
+            life = max(1, int(round(self.distance_factor / TIRE_WEAR_PER_LAP[tire])))
             grip = int(tire_grip(tire, self.track_wetness) * 100)
             grip_color = (0, 220, 110) if grip >= 90 else (255, 190, 0) if grip >= 70 else (230, 70, 70)
             screen.blit(self.font.render(get_text("TIRE PACE"), True, (170, 170, 190)), (card.x + 14, card.y + 85))
@@ -2343,10 +2687,10 @@ class ChampionshipScreen(Screen):
 
         geometry = get_pit_geometry(self.current_track)
         entry, length = geometry["entry"], geometry["length"]
-        compression = getattr(self, 'time_compression', 1.0)
+        sc_points_per_sec = SAFETY_CAR_PACE * self.speed_scale   # bodů racing_line za race-sekundu
 
         if phase == "PITTING":
-            self.safety_car_lane_d += SAFETY_CAR_PACE * compression * delta_time
+            self.safety_car_lane_d += sc_points_per_sec * delta_time
             if self.safety_car_lane_d > length + 1.0:
                 self.safety_car_phase = "NONE"
                 self.safety_car_in_lane = False
@@ -2365,7 +2709,7 @@ class ChampionshipScreen(Screen):
             return
 
         # LEADING / ENDING: SC jede svým tempem (stejné jako auta v koloně za ním)
-        self.safety_car_progress += SAFETY_CAR_PACE * compression * delta_time
+        self.safety_car_progress += sc_points_per_sec * delta_time
         while self.safety_car_progress >= 1.0:
             self.safety_car_progress -= 1.0
             self.safety_car_index = (self.safety_car_index + 1) % path_len
@@ -2388,7 +2732,7 @@ class ChampionshipScreen(Screen):
         elif phase == "ENDING":
             if self.safety_car_timer > 0:
                 self.safety_car_phase = "LEADING"            # nová nehoda SC prodloužila
-            elif d_entry < max(PIT_ENTRY_WINDOW, SAFETY_CAR_PACE * compression * delta_time):
+            elif d_entry < max(PIT_ENTRY_WINDOW, sc_points_per_sec * delta_time):
                 # SC zatáčí do uličky -> pole je uvolněné, závod pokračuje
                 self.safety_car_phase = "PITTING"
                 self.safety_car_active = False
@@ -2417,7 +2761,8 @@ class ChampionshipScreen(Screen):
             if gap > 0:
                 # Rychlost dohánění je úměrná velikosti mezery, takže i auto ztracené
                 # o celé kolo dožene frontu nejpozději za SAFETY_CAR_MAX_CATCHUP_TIME sekund.
-                overrides[id(driver)] = SAFETY_CAR_PACE + gap / SAFETY_CAR_MAX_CATCHUP_TIME
+                # gap je v bodech, rychlosti v podílu závodního tempa -> přepočet přes speed_scale
+                overrides[id(driver)] = SAFETY_CAR_PACE + gap / (SAFETY_CAR_MAX_CATCHUP_TIME * self.speed_scale)
             else:
                 # Auto, které je před svým místem ve frontě, jen zvolní - dřív dostalo
                 # rychlost 0 a na mapě doslova zaparkovalo uprostřed trati.
@@ -2598,8 +2943,7 @@ class ChampionshipScreen(Screen):
                         self.player_team = None
                         return
                     if self.start_season_button and self.start_season_button.collidepoint(pos):
-                        self.state = "RACE"
-                        self._load_race()
+                        self._start_qualifying()     # před závodem se jede kvalifikace
                         return
 
                 elif self.state == "RACE":
@@ -2628,6 +2972,14 @@ class ChampionshipScreen(Screen):
                         if btn["rect"].collidepoint(pos):
                             self.time_scale = btn["speed"]
 
+                elif self.state == "QUALIFYING":
+                    if self.quali_skip_button and self.quali_skip_button.collidepoint(pos):
+                        self._skip_qualifying()
+                    elif self.quali_race_button and self.quali_race_button.collidepoint(pos):
+                        self.state = "RACE"
+                        self._load_race()
+                    return
+
                 elif self.state == "SAVE_LIST":
                     # Kliknutí na řádek = vybrat, druhé kliknutí na vybraný = načíst
                     for i, rect in enumerate(self.save_rects):
@@ -2643,6 +2995,16 @@ class ChampionshipScreen(Screen):
                 if (self.race_finished and self.state == "RACE" and not self.show_ingame_menu
                         and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER)):
                     self.leave_results()
+                    return
+
+                # Kvalifikace: mezerník/Enter přeskočí zbytek segmentu, po dojetí spustí závod
+                if self.state == "QUALIFYING":
+                    if event.key in (pygame.K_SPACE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
+                        if self.quali and self.quali["done"]:
+                            self.state = "RACE"
+                            self._load_race()
+                        else:
+                            self._skip_qualifying()
                     return
 
                 # Seznam uložených her: šipky vybírají, Enter načte VYBRANOU hru.
@@ -2986,6 +3348,9 @@ class ChampionshipScreen(Screen):
             pygame.draw.rect(screen, (255,255,255), self.start_season_button, 4)
             txt = self.font_big.render(get_text("ZAČÁTEK SEZÓNY"), True, (255,255,255))
             screen.blit(txt, txt.get_rect(center=self.start_season_button.center))
+
+        elif self.state == "QUALIFYING":
+            self._draw_qualifying(screen)
 
         elif self.state == "RACE":
             if self.race_finished:
@@ -3517,7 +3882,7 @@ class SettingsScreen(Screen):
             self._button(screen, rect, str(fps), fps == CURRENT_FPS)
 
         # Délka závodu
-        card = pygame.Rect(right, 180, card_w, 150)
+        card = pygame.Rect(right, 180, card_w, 165)
         self._card(screen, card, get_text("DÉLKA ZÁVODU"))
         self.race_mode_buttons = []
         for i, mode in enumerate(self.race_modes):
@@ -3525,6 +3890,8 @@ class SettingsScreen(Screen):
             self.race_mode_buttons.append(rect)
             label = get_text("SHORT RACE" if mode == "SHORT" else "FULL RACE (1h30+)")
             self._button(screen, rect, label, i == self.current_race_mode_index)
+        screen.blit(self.font_small.render(get_text("RACE LENGTH HINT"), True, (150, 150, 170)),
+                    (card.x + 24, card.y + 130))
 
         # Jazyk
         card = pygame.Rect(left, 360, card_w, 150)

@@ -106,32 +106,68 @@ vždy ho načítat přes `os.path.join(SCRIPT_DIR, ...)`, jinak se stejný bug v
 ## Lokalizace
 Vše přes slovník `TEXTS` + `get_text(key)`. Nikdy nenechávat hardcoded české texty v UI.
 
-## Race mode (SHORT vs FULL) - POZOR, názvy zatím neodpovídají chování
-Oba režimy jedou **plný počet kol** z dat tratě. Liší se jen `self.time_compression`
-(nastaveno v `_load_race`): FULL = 1.0, SHORT = 0.35. Používá se v `update()` při výpočtu
-posunu: `speed *= self.time_compression`, takže **nižší hodnota = pomalejší kolo**.
+## Délka závodu a čas (SHORT vs FULL) - PŘEDĚLÁNO
+**Tempo je vždy reálné, režim mění POČET KOL.** Dřív se lišila rychlost (`time_compression`
+FULL 1.0 / SHORT 0.35) a délka kola vycházela z počtu bodů `racing_line` - tedy z toho, kolik
+jich bylo ručně naklikáno (39-80). Důsledky: "SHORT" byl 2,9x DELŠÍ než "FULL" (2 h vs 43 min),
+popisek "FULL RACE (1h30+)" neseděl a Monza měla nejkratší kolo v kalendáři.
 
-Naměřeno (time_scale 1x, tj. 1 race-sekunda = 1 reálná sekunda):
+Dnešní model:
+- `RACE_LAP_SECONDS[trať]` = délka jednoho kola v race-sekundách pro vůz s referenčním tempem
+  (base_speed 1.0). Hodnoty odpovídají ZÁVODNÍMU tempu reálné F1 (68-108 s).
+- `_load_race()` spočítá `self.speed_scale = len(racing_line) / lap_seconds` = kolik bodů
+  ujede referenční vůz za race-sekundu. `_frame_speeds()` jím násobí všechny rychlosti, takže
+  délka kola je daná TRATÍ, ne rozlišením nakreslené čáry. `time_compression` je zrušená.
+- `RACE_DISTANCE = {"SHORT": 0.30, "FULL": 1.0}` = podíl kol z plné distance
+  (jako "race distance" v jiných F1 hrách). Testovací režim to ještě zkrátí.
+- `self.distance_factor` = skutečný podíl kol. Krátký závod je ZHUŠTĚNÝ plný závod:
+  opotřebení gum `/ distance_factor`, délky stintů `* distance_factor`, pravděpodobnost nehod
+  a SC `event_laps = frame_laps / distance_factor`, interval a rychlost změn počasí
+  `* distance_factor`. Bez toho mělo 18kolové SHORT 0,2 pit stopu a 0,2 SC na celé pole.
+- Rychlosti SC/VSC jsou teď PODÍLY závodního tempa (`SAFETY_CAR_PACE` 0,65, `VSC_PACE` 0,60),
+  ne absolutní body/s - jinak by se s novým měřítkem rozbily.
+- `PIT_TIME` = 2,5 race-sekundy stání + průjezd uličkou `PIT_LANE_SPEED_FACTOR` (0,30);
+  dohromady ztráta 15-23 s podle tratě (reálně ~20 s).
 
-| trať | bodů | SHORT s/kolo | SHORT závod | FULL s/kolo | FULL závod | reálná F1 |
-|------|-----:|-------------:|------------:|------------:|-----------:|----------:|
-| Australia | 44 | 126 s | 2 h 02 | 44 s | 43 min | ~80 s |
-| Monaco | 77 | 220 s | 4 h 46 | 77 s | 1 h 40 | ~72 s |
-| Belgium | 71 | 203 s | 2 h 29 | 71 s | 52 min | ~105 s |
-| Monza | 39 | 111 s | 1 h 38 | 39 s | 34 min | ~81 s |
+Naměřeno (1x rychlost = reálný čas; `check_timing.py` ve scratchpadu):
 
-Z toho plynou dva otevřené problémy (rozhodnutí je na uživateli, viz TODO):
-1. **"SHORT" je ~2,9x DELŠÍ než "FULL"** - názvy i popisek "FULL RACE (1h30+)" jsou obrácené.
-2. **Délka kola je úměrná počtu bodů `racing_line`**, což je jen rozlišení ručního kreslení
-   tratě (39-80 bodů), ne reálná délka okruhu. Monza (39 bodů) má proto nejkratší kolo,
-   přestože je ve skutečnosti mezi delšími. Stejný problém mělo kdysi formační kolo a vyřešil
-   se tabulkou `TRACK_LENGTH_KM` - závodní kolo čeká na totéž.
+| trať | kolo | SHORT | FULL | reálná F1 |
+|------|-----:|------:|-----:|----------:|
+| Australia | 80 s | 17 kol / 23 min | 58 kol / 77 min | 1:35 |
+| Monaco | 75 s | 23 kol / 29 min | 78 kol / 97 min | 1:45 |
+| Belgium | 108 s | 13 kol / 23 min | 44 kol / 79 min | 1:25 |
+| Bahrain | 95 s | 17 kol / 27 min | 57 kol / 90 min | 1:32 |
 
-Pozn.: herní BALANC už na tomhle nezávisí - opotřebení, incidenty, souboje, AI strategie i
-počasí jsou přepočítané na KOLA, ne na sekundy. Mění se jen délka hodin na obrazovce.
+Formační kolo vyjde na 1,3-2,0x závodního kola (reálně ~1,6x) a je stejné v obou režimech.
+
+## Kvalifikace (Q1 / Q2 / Q3)
+Před KAŽDÝM závodem; nahradila náhodný startovní rošt. Měřeno: s náhodným roštem nevyhrál
+nejrychlejší vůz ani jeden ze 14 závodů, po kvalifikaci vyhrává z pole position ~50 % závodů
+a mistrem sezóny se stal nejrychlejší vůz.
+
+- `_start_qualifying()` - vylosuje formu na víkend (`race_form`, `quali_form`) a připraví
+  segmenty `QUALI_SEGMENTS` = Q1 (20 aut, postupuje 15, 16 s), Q2 (15 -> 10, 14 s),
+  Q3 (10 -> pole, 12 s). Forma se losuje TADY (ne v `_load_race`), aby kvalifikace i závod
+  jely se stejnými hodnotami; `_load_race()` ji přelosuje jen když kvalifikace neproběhla
+  (`self.form_round`).
+- `_update_qualifying(real_delta_time)` běží v REÁLNÉM čase (nezávisle na time_scale). Každý
+  jezdec má v segmentu 2-3 naplánovaná měřená kola (`_schedule_quali_runs`), čas počítá
+  `_quali_lap_time()` = `race_lap_seconds * QUALI_LAP_FACTOR (0,93) / (tempo vozu * forma)`
+  s rozptylem `QUALI_LAP_NOISE`.
+- `_finish_quali_segment()` seřadí časy, vyřazené uloží na konec roštu (Q3 nahoře, pak Q2,
+  pak Q1) a spustí další segment. Výsledek: `self.quali_grid` (jména) + `self.quali_round`.
+- `_load_race()` postaví rošt podle `quali_grid`, pokud platí pro tenhle závod; jinak náhodně
+  (např. po načtení uložené hry).
+- UI `_draw_qualifying()`: tabulka 20 jezdců (pozice, tým barvou, čas, odstup, stav),
+  zvýrazněné vozy hráče, červeně ti, kdo právě vypadávají, zelený rámeček u zlepšeného času,
+  ukazatel času segmentu. Tlačítko PŘESKOČIT (i mezerník/ESC) dopočítá zbytek okamžitě,
+  po dojetí tlačítko NA STARTOVNÍ ROŠT spustí závod.
+- Stav obrazovky: `ChampionshipScreen.state == "QUALIFYING"`; `next_race()` i tlačítko
+  "ZAČÁTEK SEZÓNY" vedou na kvalifikaci, ne rovnou na závod.
 
 ## Hlavní třídy/stavy
-`ChampionshipScreen.state`: `TEAM_SELECT` → `SEASON_START` → `RACE`, plus `SAVE_LIST`.
+`ChampionshipScreen.state`: `TEAM_SELECT` → `SEASON_START` → `QUALIFYING` → `RACE`,
+plus `SAVE_LIST`. Po závodě vede "DALŠÍ ZÁVOD" zase na `QUALIFYING`.
 In-game menu: `show_ingame_menu` + `paused` (ESC otvírá/zavírá, Pause tlačítko jen
 pauzuje čas).
 
@@ -670,15 +706,12 @@ startovací audio komentář (CS/EN), plná lokalizace CS/EN/IT, ukládání/na�
 auto-save po závodě, in-game menu (ESC), Settings (FPS, Race Length, Language).
 
 ## TODO priority
-**Čeká na rozhodnutí uživatele (viz "Race mode"):**
-1. Obrácené názvy SHORT/FULL. Nejmenší oprava = prohodit hodnoty `time_compression`
-   (SHORT 1.0, FULL 0.35); čistší = doplnit reálné délky kol (`TRACK_LENGTH_KM` už existuje)
-   a ze SHORT/FULL udělat volbu DÉLKY závodu (25/50/100 % kol) jako v ostatních F1 hrách.
-2. Kvalifikace. Změřeno: s náhodným roštem vyhraje nejrychlejší vůz **0 z 14** závodů
-   (průměrně vyhrává 6. nejrychlejší); když se rošt seřadí podle tempa, vyhraje **5 ze 14**
-   a průměrné pořadí vítěze je 2,0 - přesně jako v reálu. Kvalifikace je tedy jediná věc,
-   která chybí k tomu, aby výsledky dávaly smysl. Až bude, nahradí `random.shuffle` v
-   `_load_race()`.
+**Hotovo (bylo tu jako priorita):** reálné délky kol + SHORT/FULL jako podíl distance;
+kvalifikace Q1/Q2/Q3. Viz sekce výše.
+
+**Další na řadě (nápady):** interakce hráče v kvalifikaci (volba gum / kdy vyjet na trať);
+sprint víkendy; penalizace (průjezd boxy, odebrání času); vývoj vozu mezi závody; poškození
+vozu po kontaktu; historie sezón.
 
 **Střední:** doplnit chybějící překlady hardcoded textů; pit stopy: double-stack (oba jezdci
 týmu se dvěma auty v boxu naráz nečekají na sebe), v uličce se nekontroluje kolize aut;
